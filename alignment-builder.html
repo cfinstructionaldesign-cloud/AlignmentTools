@@ -1,1348 +1,976 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  Plus, 
-  Trash2, 
-  AlertTriangle, 
-  CheckCircle, 
-  Info, 
-  ChevronDown, 
-  ChevronRight,
-  BookOpen,
-  Target,
-  Activity,
-  Lightbulb,
-  Copy,
-  MessageSquare,
-  ShieldCheck,
-  X,
-  Mail,
-  Download,
-  Upload,
-  Sparkles,
-  Loader2
-} from 'lucide-react';
-
-// --- Data Dictionaries (Updated from QRG Document) ---
-
-const unmeasurableVerbs = [
-  'understand the context of', 'understand', 'remember', 'know', 'learn', 
-  'appreciate', 'comprehend', 'familiarize', 'become familiar with', 
-  'be aware of', 'be exposed to', 'believe', 'conceptualize', 'discover', 
-  'experience', 'explore', 'gain knowledge of', 'grasp the significance of', 
-  'have a good grasp of', 'grasp', 'listen', 'memorize', 'notice', 
-  'perceive', 'realize', 'think', 'study', 'cover', 'read'
-];
-
-const bloomsTaxonomy = [
-  {
-    level: 'Remembering',
-    description: 'The student can recognize the information and principles that were presented.',
-    color: 'bg-rose-100 text-rose-800 border-rose-200',
-    verbs: ['Arrange', 'Complete', 'Define', 'Describe', 'Duplicate', 'Identify', 'Label', 'List', 'Locate', 'Match', 'Name', 'Order', 'Outline', 'Place', 'Quote', 'Recite', 'Recognize', 'Relate', 'Recall', 'Repeat', 'Reproduce', 'Select', 'State']
-  },
-  {
-    level: 'Understanding',
-    description: 'The student translates or interprets information based on prior learning.',
-    color: 'bg-orange-100 text-orange-800 border-orange-200',
-    verbs: ['Classify', 'Convert', 'Contrast', 'Defend', 'Describe', 'Discuss', 'Distinguish', 'Explain', 'Estimate', 'Express', 'Extend', 'Generalize', 'Identify', 'Illustrate', 'Indicate', 'Interpret', 'Paraphrase', 'Predict', 'Recognize', 'Restate', 'Rewrite', 'Select', 'Summarize', 'Translate']
-  },
-  {
-    level: 'Applying',
-    description: 'The student selects, transfers, and uses data and principles to complete a problem or task.',
-    color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    verbs: ['Apply', 'Change', 'Choose', 'Compute', 'Demonstrate', 'Discover', 'Dramatize', 'Employ', 'Illustrate', 'Interpret', 'Manipulate', 'Modify', 'Operate', 'Practice', 'Predict', 'Prepare', 'Produce', 'Relate', 'Schedule', 'Show', 'Sketch', 'Solve', 'Use', 'Write']
-  },
-  {
-    level: 'Analyzing',
-    description: 'The student distinguishes, classifies, and relates the assumptions, hypotheses, or structure of a statement.',
-    color: 'bg-green-100 text-green-800 border-green-200',
-    verbs: ['Analyze', 'Appraise', 'Breakdown', 'Calculate', 'Categorize', 'Compare', 'Contrast', 'Criticize', 'Deduce', 'Diagram', 'Differentiate', 'Discriminate', 'Distinguish', 'Examine', 'Experiment', 'Identify', 'Illustrate', 'Infer', 'Model', 'Outline', 'Point out', 'Question', 'Relate', 'Select', 'Separate', 'Subdivide', 'Test']
-  },
-  {
-    level: 'Evaluating',
-    description: 'The student appraises, assesses, or critiques on a basis of specific standards and criteria.',
-    color: 'bg-blue-100 text-blue-800 border-blue-200',
-    verbs: ['Appraise', 'Argue', 'Assess', 'Attach', 'Choose', 'Compare', 'Conclude', 'Contrast', 'Defend', 'Describe', 'Discriminate', 'Estimate', 'Evaluate', 'Explain', 'Judge', 'Justify', 'Interpret', 'Relate', 'Predict', 'Rate', 'Select', 'Summarize', 'Support', 'Value']
-  },
-  {
-    level: 'Creating / Synthesizing',
-    description: 'The student originates, integrates, and combines ideas into a product, plan or proposal.',
-    color: 'bg-purple-100 text-purple-800 border-purple-200',
-    verbs: ['Arrange', 'Assemble', 'Build', 'Categorize', 'Collect', 'Combine', 'Compose', 'Construct', 'Create', 'Derive', 'Design', 'Develop', 'Devise', 'Explain', 'Formulate', 'Generate', 'Group', 'Integrate', 'Invent', 'Manage', 'Modify', 'Order', 'Organize', 'Plan', 'Prescribe', 'Propose', 'Rearrange', 'Reconstruct', 'Reorganize', 'Setup', 'Specify', 'Substitute', 'Transform']
-  }
-];
-
-// --- Helper Functions ---
-
-const generateId = () => Math.random().toString(36).substr(2, 9);
-
-const callGeminiAPI = async (prompt, schema = null) => {
-  const apiKey = "";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-  const payload = {
-    contents: [{ parts: [{ text: prompt }] }]
-  };
-
-  if (schema) {
-    payload.generationConfig = {
-      responseMimeType: "application/json",
-      responseSchema: schema
-    };
-  }
-
-  let retries = 5;
-  let delay = 1000;
-  while (retries > 0) {
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      return schema ? JSON.parse(text) : text;
-    } catch (error) {
-      retries--;
-      if (retries === 0) throw error;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2;
-    }
-  }
-};
-
-const analyzeObjective = (text) => {
-  if (!text) return { valid: true, warning: null };
-  
-  const lowerText = text.toLowerCase();
-  for (const verb of unmeasurableVerbs) {
-    // Scans the entire sentence for the exact unmeasurable word or phrase, no matter where it appears
-    const regex = new RegExp(`\\b${verb}\\b`, 'i');
-    if (regex.test(lowerText)) {
-      if (verb === 'understand' || verb === 'remember' || verb === 'understand the context of') {
-        return {
-            valid: false,
-            warning: `"${verb.charAt(0).toUpperCase() + verb.slice(1)}" is a level of learning, not an acceptable measurable verb. Try an action verb from Bloom's Taxonomy.`
-        }
-      }
-      return { 
-        valid: false, 
-        warning: `The phrasing "${verb}" is difficult to measure. Try using a specific action verb from Bloom's Taxonomy.` 
-      };
-    }
-  }
-  return { valid: true, warning: null };
-};
-
-const defaultObjId = generateId();
-const defaultActId = generateId();
-
-// --- Main Application Component ---
-
-export default function App() {
-  const [modules, setModules] = useState([
-    {
-      id: generateId(),
-      title: 'Module 1',
-      objectives: [{ id: defaultObjId, text: '' }],
-      activities: [{ id: defaultActId, type: 'activity', text: '', description: '', objectiveIds: [], isRSI: false }]
-    }
-  ]);
-  const [showBlooms, setShowBlooms] = useState(true);
-  const [showInfoModal, setShowInfoModal] = useState(false);
-  const [loadingStates, setLoadingStates] = useState({ 
-      objectives: {}, 
-      objectiveActivities: {}, 
-      moduleObjectives: {}, 
-      moduleAlignment: {},
-      aligningObjective: {} // Tracks individual pill toggles
-  });
-  const [appError, setAppError] = useState(null);
-  const [appSuccess, setAppSuccess] = useState(null);
-  
-  const fileInputRef = useRef(null);
-
-  // --- Export & Import Features ---
-
-  const exportCSV = () => {
-    let csvContent = "\uFEFFModule,Type,Content,Details,Aligned Objectives,RSI\n";
-    
-    modules.forEach((m) => {
-      const modTitle = `"${(m.title || '').replace(/"/g, '""')}"`;
-      
-      m.objectives.forEach((o) => {
-        const text = `"${(o.text || '').replace(/"/g, '""')}"`;
-        csvContent += `${modTitle},Objective,${text},,, \n`;
-      });
-      
-      m.activities.forEach((a) => {
-        const text = `"${(a.text || '').replace(/"/g, '""')}"`;
-        const details = `"${(a.description || '').replace(/"/g, '""')}"`;
-        const aligned = `"${a.objectiveIds.map(id => {
-          const idx = m.objectives.findIndex(o => o.id === id);
-          return idx !== -1 ? `O${idx + 1}` : '';
-        }).filter(Boolean).join(', ')}"`;
-        const rsi = a.isRSI ? 'Yes' : 'No';
-        const type = a.type === 'assessment' ? 'Assessment' : 'Activity';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instructional Alignment Builder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar for a cleaner look in the sidebars/modals */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         
-        csvContent += `${modTitle},${type},${text},${details},${aligned},${rsi}\n`;
-      });
-    });
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", "course_alignment.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      const rows = text.split(/\r?\n/).filter(row => row.trim());
-      
-      let importedModulesMap = new Map();
-
-      const parseCSVRow = (str) => {
-        let result = [];
-        let inQuotes = false;
-        let current = '';
-        for (let i = 0; i < str.length; i++) {
-          let char = str[i];
-          if (char === '"') {
-            inQuotes = !inQuotes;
-          } else if (char === ',' && !inQuotes) {
-            result.push(current);
-            current = '';
-          } else {
-            current += char;
-          }
-        }
-        result.push(current);
-        return result.map(s => s.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-      };
-
-      const startIndex = rows[0].toLowerCase().includes('module') ? 1 : 0;
-
-      for (let i = startIndex; i < rows.length; i++) {
-        const cols = parseCSVRow(rows[i]);
-        if (cols.length < 3) continue;
-
-        const modTitle = cols[0] || 'Imported Module';
-        const type = (cols[1] || '').toLowerCase();
-        const content = cols[2] || '';
-        const details = cols[3] || '';
-        const rsi = (cols[5] || '').toLowerCase() === 'yes';
-
-        if (!importedModulesMap.has(modTitle)) {
-          importedModulesMap.set(modTitle, { id: generateId(), title: modTitle, objectives: [], activities: [] });
-        }
+        .cursor-wait { cursor: wait !important; }
         
-        const mod = importedModulesMap.get(modTitle);
+        /* Spin animation for loading icons */
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
+    <div id="app" class="flex-1 flex flex-col h-screen overflow-hidden"></div>
 
-        if (type === 'objective') {
-          mod.objectives.push({ id: generateId(), text: content });
-        } else if (type === 'activity' || type === 'assessment') {
-          mod.activities.push({
-            id: generateId(),
-            type: type,
-            text: content,
-            description: details,
-            objectiveIds: [], 
-            isRSI: rsi
-          });
-        }
-      }
-
-      const newModules = Array.from(importedModulesMap.values());
-
-      if (newModules.length > 0) {
-        const isDefault = modules.length === 1 && modules[0].objectives.length === 1 && modules[0].objectives[0].text === '' && modules[0].activities.length === 1 && modules[0].activities[0].text === '';
+    <script>
+        // --- 1. Data Dictionaries & Constants ---
         
-        if (isDefault) {
-          setModules(newModules);
-        } else {
-          setModules(prev => [...prev, ...newModules]);
-        }
-        
-        setAppSuccess("CSV Imported Successfully! You can now use 'Auto-Align All' to map your items.");
-        setTimeout(() => setAppSuccess(null), 5000);
-      }
-      
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.readAsText(file);
-  };
+        const unmeasurableVerbs = [
+            'understand the context of', 'understand', 'remember', 'know', 'learn', 
+            'appreciate', 'comprehend', 'familiarize', 'become familiar with', 
+            'be aware of', 'be exposed to', 'believe', 'conceptualize', 'discover', 
+            'experience', 'explore', 'gain knowledge of', 'grasp the significance of', 
+            'have a good grasp of', 'grasp', 'listen', 'memorize', 'notice', 
+            'perceive', 'realize', 'think', 'study', 'cover', 'read'
+        ];
 
-  // --- Gemini AI Features ---
-
-  const handleRewriteObjective = async (moduleId, objectiveId, currentText) => {
-    if (!currentText.trim()) return;
-    setAppError(null);
-    setLoadingStates(prev => ({ ...prev, objectives: { ...prev.objectives, [objectiveId]: true } }));
-    
-    try {
-      const prompt = `You are an expert instructional designer strictly following Quality Matters (QM) standards. Rewrite the following learning objective to make it specific, measurable, and aligned with Bloom's Taxonomy (QM Standard 2.2). Use a strong action verb. Keep it to a single, concise sentence. Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions. 
-      \nCurrent objective: "${currentText}"`;
-      
-      const result = await callGeminiAPI(prompt);
-      if (result) {
-          updateObjective(moduleId, objectiveId, result.replace(/["']/g, '').trim());
-      }
-    } catch (err) {
-      console.error("Gemini API Error:", err);
-      setAppError("Failed to rewrite objective. Please try again.");
-      setTimeout(() => setAppError(null), 3000);
-    } finally {
-      setLoadingStates(prev => ({ ...prev, objectives: { ...prev.objectives, [objectiveId]: false } }));
-    }
-  };
-
-  const handleSuggestActivitiesForObjective = async (moduleId, objectiveId, objectiveText) => {
-    if (!objectiveText.trim()) return;
-
-    setAppError(null);
-    setLoadingStates(prev => ({ ...prev, objectiveActivities: { ...prev.objectiveActivities, [objectiveId]: true } }));
-    
-    try {
-      const prompt = `You are an expert instructional designer adhering to Quality Matters (QM) and Regular and Substantive Interaction (RSI) standards. 
-      Given this specific learning objective: "${objectiveText}"
-      
-      Suggest 2 specific coursework items that would accurately measure this single objective (QM 2.4). 
-      1. One "activity": This must include a description of Regular and Substantive Interaction (RSI), such as a moderated discussion, direct instruction, or substantive faculty feedback. Provide detailed instructions in the "description" field.
-      2. One "assessment": Match the assessment type to the cognitive level of the objective (e.g., lower-level objectives get quizzes, higher-level objectives get essays/projects). Provide detailed rubric parameters, essay prompts, or sample quiz questions in the "description" field.
-      Return the result as a JSON array.`;
-
-      const schema = {
-        type: "ARRAY",
-        items: {
-          type: "OBJECT",
-          properties: {
-            type: { type: "STRING", enum: ["activity", "assessment"] },
-            text: { type: "STRING", description: "A concise title or short description of the activity or assessment" },
-            description: { type: "STRING", description: "Detailed instructions, discussion prompts, sample questions, or rubric parameters." },
-            isRSI: { type: "BOOLEAN", description: "True if this activity includes Regular and Substantive Interaction (RSI) from the instructor" }
-          },
-          required: ["type", "text", "description", "isRSI"]
-        }
-      };
-
-      const result = await callGeminiAPI(prompt, schema);
-      
-      if (result && Array.isArray(result)) {
-          const newActivities = result.map(item => ({
-              id: generateId(),
-              type: item.type === 'assessment' ? 'assessment' : 'activity',
-              text: item.text,
-              description: item.description || '',
-              isRSI: item.isRSI || false,
-              objectiveIds: [objectiveId]
-          }));
-          
-          setModules(prevModules => prevModules.map(m => {
-              if (m.id === moduleId) {
-                  return { ...m, activities: [...m.activities, ...newActivities] };
-              }
-              return m;
-          }));
-      }
-    } catch (err) {
-      console.error("Gemini API Error:", err);
-      setAppError("Failed to suggest activities. Please try again.");
-      setTimeout(() => setAppError(null), 3000);
-    } finally {
-      setLoadingStates(prev => ({ ...prev, objectiveActivities: { ...prev.objectiveActivities, [objectiveId]: false } }));
-    }
-  };
-
-  const handleSuggestObjectives = async (moduleId) => {
-    const module = modules.find(m => m.id === moduleId);
-    const activityTexts = module.activities.filter(a => a.text.trim()).map(a => {
-        const context = a.description?.trim() ? `\n  Context/Details: ${a.description}` : '';
-        return `${a.type.toUpperCase()}: ${a.text}${context}`;
-    });
-    
-    if (activityTexts.length === 0) {
-        setAppError("Please add at least one activity or assessment first to generate objectives.");
-        setTimeout(() => setAppError(null), 3000);
-        return;
-    }
-
-    setAppError(null);
-    setLoadingStates(prev => ({ ...prev, moduleObjectives: { ...prev.moduleObjectives, [moduleId]: true } }));
-    
-    try {
-      const prompt = `You are an expert instructional designer adhering to Quality Matters (QM) standards. 
-      Given the following coursework activities and assessments:\n${activityTexts.map(t => `- ${t}`).join('\n')}\n\n
-      Suggest 2 specific, measurable learning objectives that these activities would effectively measure (QM Standard 2.2). 
-      Use strong action verbs from Bloom's Taxonomy. Keep them to a single, concise sentence. 
-      Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions.
-      Return the result as a JSON array.`;
-
-      const schema = {
-        type: "ARRAY",
-        items: {
-          type: "OBJECT",
-          properties: {
-            text: { type: "STRING", description: "A concise, measurable learning objective" }
-          },
-          required: ["text"]
-        }
-      };
-
-      const result = await callGeminiAPI(prompt, schema);
-      
-      if (result && Array.isArray(result)) {
-          const newObjectives = result.map(item => ({
-              id: generateId(),
-              text: item.text
-          }));
-          const newObjectiveIds = newObjectives.map(o => o.id);
-          
-          setModules(prevModules => prevModules.map(m => {
-              if (m.id === moduleId) {
-                  const updatedActivities = m.activities.map(a => ({
-                      ...a,
-                      objectiveIds: [...new Set([...a.objectiveIds, ...newObjectiveIds])]
-                  }));
-
-                  return { 
-                      ...m, 
-                      objectives: [...m.objectives, ...newObjectives],
-                      activities: updatedActivities
-                  };
-              }
-              return m;
-          }));
-      }
-    } catch (err) {
-      console.error("Gemini API Error:", err);
-      setAppError("Failed to suggest objectives. Please try again.");
-      setTimeout(() => setAppError(null), 3000);
-    } finally {
-      setLoadingStates(prev => ({ ...prev, moduleObjectives: { ...prev.moduleObjectives, [moduleId]: false } }));
-    }
-  };
-
-  const handleAutoAlignModule = async (moduleId) => {
-    const module = modules.find(m => m.id === moduleId);
-    const objectives = module.objectives.filter(o => o.text.trim());
-    const activities = module.activities.filter(a => a.text.trim());
-    
-    if (activities.length === 0) {
-        setAppError("Please add at least one coursework/assessment item first.");
-        setTimeout(() => setAppError(null), 3000);
-        return;
-    }
-
-    if (objectives.length === 0) {
-        setAppError("Please add at least one learning objective first.");
-        setTimeout(() => setAppError(null), 3000);
-        return;
-    }
-
-    setAppError(null);
-    setLoadingStates(prev => ({ ...prev, moduleAlignment: { ...prev.moduleAlignment, [moduleId]: true } }));
-    
-    try {
-      const prompt = `You are an expert instructional designer assessing course alignment (QM Standard 2.4).
-      We have the following Module Learning Objectives:
-      ${objectives.map((o) => `[Obj-ID: ${o.id}] ${o.text}`).join('\n')}
-
-      We have the following Coursework/Assessments:
-      ${activities.map((a) => `[Act-ID: ${a.id}] Type: ${a.type} | Title: "${a.text}" | Details: "${a.description || 'None provided'}"`).join('\n')}
-
-      Evaluate which of the above objectives are directly measured by each activity. 
-      CRITICAL INSTRUCTIONS (Based on strict alignment rules):
-      1. The cognitive level of the assessment MUST match the cognitive level of the objective's verb. (e.g., A multiple choice quiz matches "recognize", but does NOT match "create" or "defend").
-      2. Reading material or viewing a video is NOT mastery of the material, and it is NOT possible to measure that. Activities like "Read Chapter 1" or "Watch Video" MUST NOT align with any objectives on their own.
-      3. Be highly critical: If the information on the coursework/assessment DOES NOT explicitly and definitively match the objective's rigor and content, DO NOT select it.
-      
-      Return a JSON array of objects. Each object must represent an activity from the list and contain its "activityId" and an array of the strictly matching "objectiveIds". If an activity does not clearly align with any of them, return an empty array [] for its objectiveIds.`;
-
-      const schema = {
-        type: "ARRAY",
-        items: {
-          type: "OBJECT",
-          properties: {
-            activityId: { type: "STRING" },
-            objectiveIds: {
-              type: "ARRAY",
-              items: { type: "STRING" }
+        const bloomsTaxonomy = [
+            {
+                level: 'Remembering',
+                description: 'The student can recognize the information and principles that were presented.',
+                color: 'bg-rose-100 text-rose-800 border-rose-200',
+                verbs: ['Arrange', 'Complete', 'Define', 'Describe', 'Duplicate', 'Identify', 'Label', 'List', 'Locate', 'Match', 'Name', 'Order', 'Outline', 'Place', 'Quote', 'Recite', 'Recognize', 'Relate', 'Recall', 'Repeat', 'Reproduce', 'Select', 'State']
+            },
+            {
+                level: 'Understanding',
+                description: 'The student translates or interprets information based on prior learning.',
+                color: 'bg-orange-100 text-orange-800 border-orange-200',
+                verbs: ['Classify', 'Convert', 'Contrast', 'Defend', 'Describe', 'Discuss', 'Distinguish', 'Explain', 'Estimate', 'Express', 'Extend', 'Generalize', 'Identify', 'Illustrate', 'Indicate', 'Interpret', 'Paraphrase', 'Predict', 'Recognize', 'Restate', 'Rewrite', 'Select', 'Summarize', 'Translate']
+            },
+            {
+                level: 'Applying',
+                description: 'The student selects, transfers, and uses data and principles to complete a problem or task.',
+                color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                verbs: ['Apply', 'Change', 'Choose', 'Compute', 'Demonstrate', 'Discover', 'Dramatize', 'Employ', 'Illustrate', 'Interpret', 'Manipulate', 'Modify', 'Operate', 'Practice', 'Predict', 'Prepare', 'Produce', 'Relate', 'Schedule', 'Show', 'Sketch', 'Solve', 'Use', 'Write']
+            },
+            {
+                level: 'Analyzing',
+                description: 'The student distinguishes, classifies, and relates the assumptions, hypotheses, or structure of a statement.',
+                color: 'bg-green-100 text-green-800 border-green-200',
+                verbs: ['Analyze', 'Appraise', 'Breakdown', 'Calculate', 'Categorize', 'Compare', 'Contrast', 'Criticize', 'Deduce', 'Diagram', 'Differentiate', 'Discriminate', 'Distinguish', 'Examine', 'Experiment', 'Identify', 'Illustrate', 'Infer', 'Model', 'Outline', 'Point out', 'Question', 'Relate', 'Select', 'Separate', 'Subdivide', 'Test']
+            },
+            {
+                level: 'Evaluating',
+                description: 'The student appraises, assesses, or critiques on a basis of specific standards and criteria.',
+                color: 'bg-blue-100 text-blue-800 border-blue-200',
+                verbs: ['Appraise', 'Argue', 'Assess', 'Attach', 'Choose', 'Compare', 'Conclude', 'Contrast', 'Defend', 'Describe', 'Discriminate', 'Estimate', 'Evaluate', 'Explain', 'Judge', 'Justify', 'Interpret', 'Relate', 'Predict', 'Rate', 'Select', 'Summarize', 'Support', 'Value']
+            },
+            {
+                level: 'Creating / Synthesizing',
+                description: 'The student originates, integrates, and combines ideas into a product, plan or proposal.',
+                color: 'bg-purple-100 text-purple-800 border-purple-200',
+                verbs: ['Arrange', 'Assemble', 'Build', 'Categorize', 'Collect', 'Combine', 'Compose', 'Construct', 'Create', 'Derive', 'Design', 'Develop', 'Devise', 'Explain', 'Formulate', 'Generate', 'Group', 'Integrate', 'Invent', 'Manage', 'Modify', 'Order', 'Organize', 'Plan', 'Prescribe', 'Propose', 'Rearrange', 'Reconstruct', 'Reorganize', 'Setup', 'Specify', 'Substitute', 'Transform']
             }
-          },
-          required: ["activityId", "objectiveIds"]
-        }
-      };
+        ];
 
-      const result = await callGeminiAPI(prompt, schema);
-      
-      if (result && Array.isArray(result)) {
-          setModules(prevModules => prevModules.map(m => {
-              if (m.id === moduleId) {
-                  const updatedActivities = m.activities.map(a => {
-                      const match = result.find(r => r.activityId === a.id);
-                      if (match) {
-                          const validIds = (match.objectiveIds || []).filter(id => objectives.some(o => o.id === id));
-                          return { ...a, objectiveIds: validIds };
-                      }
-                      return a; // Leave untouched if no result returned
-                  });
-                  return { ...m, activities: updatedActivities };
-              }
-              return m;
-          }));
-      }
-    } catch (err) {
-      console.error("Gemini API Error:", err);
-      setAppError("Failed to auto-align module. Please try again.");
-      setTimeout(() => setAppError(null), 3000);
-    } finally {
-      setLoadingStates(prev => ({ ...prev, moduleAlignment: { ...prev.moduleAlignment, [moduleId]: false } }));
-    }
-  };
-
-  const handleToggleAlignmentWithValidation = async (moduleId, activityId, objectiveId) => {
-    const module = modules.find(m => m.id === moduleId);
-    const activity = module.activities.find(a => a.id === activityId);
-    const objective = module.objectives.find(o => o.id === objectiveId);
-    
-    const isAligned = activity.objectiveIds.includes(objectiveId);
-
-    // If already aligned, we are toggling OFF. No validation needed.
-    if (isAligned) {
-      toggleObjectiveAlignment(moduleId, activityId, objectiveId);
-      return;
-    }
-
-    // If turning ON, but texts are empty, just allow it
-    if (!activity.text.trim() || !objective.text.trim()) {
-      toggleObjectiveAlignment(moduleId, activityId, objectiveId);
-      return;
-    }
-
-    // Otherwise, rigorously validate with AI before allowing the manual click
-    const loadingKey = `${activityId}-${objectiveId}`;
-    setLoadingStates(prev => ({ ...prev, aligningObjective: { ...prev.aligningObjective, [loadingKey]: true } }));
-    setAppError(null);
-
-    try {
-      const prompt = `You are a strict instructional designer enforcing Quality Matters (QM) Standard 2.4.
-      Objective: "${objective.text}"
-      Coursework/Assessment: Type: ${activity.type} | Title: "${activity.text}" | Details: "${activity.description || 'None'}"
-
-      Evaluate if this coursework STRICTLY measures this specific objective.
-      CRITICAL RULES:
-      1. Reading material or viewing a video is NOT a measurement of mastery. If it is just reading/watching, it DOES NOT align.
-      2. The cognitive level MUST match. A quiz doesn't measure "create" or "defend".
-      
-      Return JSON indicating if it truly "aligns" (boolean) and a short "reason" explaining why it aligns or why it violates QM 2.4.`;
-
-      const schema = {
-        type: "OBJECT",
-        properties: {
-          aligns: { type: "BOOLEAN" },
-          reason: { type: "STRING" }
-        },
-        required: ["aligns", "reason"]
-      };
-
-      const result = await callGeminiAPI(prompt, schema);
-      
-      if (result) {
-        if (result.aligns) {
-          toggleObjectiveAlignment(moduleId, activityId, objectiveId);
-        } else {
-          // Reject the click and show the instructor exactly why they can't do it!
-          setAppError(`Alignment Rejected: ${result.reason}`);
-          setTimeout(() => setAppError(null), 8000); 
-        }
-      } else {
-          toggleObjectiveAlignment(moduleId, activityId, objectiveId);
-      }
-    } catch (err) {
-      console.error("Gemini Validation Error:", err);
-      toggleObjectiveAlignment(moduleId, activityId, objectiveId); // Fallback if API fails
-    } finally {
-      setLoadingStates(prev => ({ ...prev, aligningObjective: { ...prev.aligningObjective, [loadingKey]: false } }));
-    }
-  };
-
-  // --- State Handlers ---
-
-  const addModule = () => {
-    setModules([...modules, {
-      id: generateId(),
-      title: `Module ${modules.length + 1}`,
-      objectives: [{ id: generateId(), text: '' }],
-      activities: [{ id: generateId(), type: 'activity', text: '', description: '', objectiveIds: [], isRSI: false }]
-    }]);
-  };
-
-  const updateModuleTitle = (moduleId, title) => {
-    setModules(modules.map(m => m.id === moduleId ? { ...m, title } : m));
-  };
-
-  const deleteModule = (moduleId) => {
-    setModules(modules.filter(m => m.id !== moduleId));
-  };
-
-  const addObjective = (moduleId) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return { ...m, objectives: [...m.objectives, { id: generateId(), text: '' }] };
-      }
-      return m;
-    }));
-  };
-
-  const updateObjective = (moduleId, objectiveId, text) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return {
-          ...m,
-          objectives: m.objectives.map(o => o.id === objectiveId ? { ...o, text } : o)
+        // --- 2. Icon Dictionary (SVG Paths replacing Lucide-React) ---
+        const icons = {
+            Target: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+            BookOpen: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+            Upload: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+            Download: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+            ShieldCheck: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 11l3 3 5-5"/></svg>',
+            AlertTriangle: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+            CheckCircle: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+            X: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+            Mail: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+            Plus: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+            Trash2: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
+            Sparkles: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>',
+            Activity: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+            Info: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+            Loader2: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
+            Lightbulb: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/></svg>',
+            ChevronDown: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+            ChevronRight: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+            Copy: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+            MessageSquare: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
         };
-      }
-      return m;
-    }));
-  };
 
-  const deleteObjective = (moduleId, objectiveId) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        const newActivities = m.activities.map(a => ({
-          ...a,
-          objectiveIds: a.objectiveIds.filter(id => id !== objectiveId)
-        }));
-        return {
-          ...m,
-          objectives: m.objectives.filter(o => o.id !== objectiveId),
-          activities: newActivities
+        const renderIcon = (name, size = 18, classes = '') => {
+            return `<div class="inline-block flex-shrink-0 ${classes}" style="width: ${size}px; height: ${size}px;">${icons[name]}</div>`;
         };
-      }
-      return m;
-    }));
-  };
 
-  const addActivity = (moduleId, type = 'activity') => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return { 
-          ...m, 
-          activities: [
-            ...m.activities, 
-            { id: generateId(), type, text: '', description: '', objectiveIds: [], isRSI: false }
-          ] 
-        };
-      }
-      return m;
-    }));
-  };
-
-  const updateActivity = (moduleId, activityId, text) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return {
-          ...m,
-          activities: m.activities.map(a => a.id === activityId ? { ...a, text } : a)
-        };
-      }
-      return m;
-    }));
-  };
-
-  const updateActivityDescription = (moduleId, activityId, description) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return {
-          ...m,
-          activities: m.activities.map(a => a.id === activityId ? { ...a, description } : a)
-        };
-      }
-      return m;
-    }));
-  };
-
-  const toggleActivityRSI = (moduleId, activityId) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return {
-          ...m,
-          activities: m.activities.map(a => a.id === activityId ? { ...a, isRSI: !a.isRSI } : a)
-        };
-      }
-      return m;
-    }));
-  };
-
-  const toggleObjectiveAlignment = (moduleId, activityId, objectiveId) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return {
-          ...m,
-          activities: m.activities.map(a => {
-            if (a.id === activityId) {
-              const isAligned = a.objectiveIds.includes(objectiveId);
-              const newObjectiveIds = isAligned 
-                ? a.objectiveIds.filter(id => id !== objectiveId)
-                : [...a.objectiveIds, objectiveId];
-              return { ...a, objectiveIds: newObjectiveIds };
-            }
-            return a;
-          })
-        };
-      }
-      return m;
-    }));
-  };
-
-  const deleteActivity = (moduleId, activityId) => {
-    setModules(modules.map(m => {
-      if (m.id === moduleId) {
-        return { ...m, activities: m.activities.filter(a => a.id !== activityId) };
-      }
-      return m;
-    }));
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10 shadow-sm">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Target className="text-blue-600" />
-            Instructional Alignment Builder
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">Design measurable objectives, map coursework, and verify QM/RSI compliance.</p>
-        </div>
+        // --- 3. Utilities & Global State ---
         
-        {/* Action Bar */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Hidden File Input for CSV Upload */}
-          <input 
-            type="file" 
-            accept=".csv" 
-            ref={fileInputRef} 
-            onChange={handleFileUpload} 
-            className="hidden" 
-          />
-          
-          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-sm">
-             <button 
-                onClick={() => fileInputRef.current.click()}
-                title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-slate-600 hover:bg-white hover:text-slate-800 transition-colors"
-              >
-                <Upload size={16} /> <span className="text-sm hidden lg:inline">Import CSV</span>
-              </button>
-              <button 
-                onClick={exportCSV}
-                title="Export to CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-slate-600 hover:bg-white hover:text-slate-800 transition-colors"
-              >
-                <Download size={16} /> <span className="text-sm hidden lg:inline">Export CSV</span>
-              </button>
-          </div>
+        const generateId = () => Math.random().toString(36).substr(2, 9);
+        const escapeHTML = (str) => {
+            if (!str) return '';
+            return str.toString().replace(/[&<>'"]/g, tag => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[tag] || tag));
+        };
 
-          <div className="h-6 w-px bg-slate-300 mx-1 hidden md:block"></div>
+        const defaultObjId = generateId();
+        const defaultActId = generateId();
 
-          <button 
-            onClick={() => setShowInfoModal(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 transition-colors shadow-sm"
-          >
-            <ShieldCheck size={18} className="text-emerald-600" />
-            <span className="hidden sm:inline">Privacy & Help</span>
-          </button>
-          <button 
-            onClick={() => setShowBlooms(!showBlooms)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-colors shadow-sm ${showBlooms ? 'bg-blue-100 text-blue-700' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`}
-          >
-            <BookOpen size={18} />
-            <span className="hidden sm:inline">{showBlooms ? 'Hide Guide' : 'Show Guide'}</span>
-          </button>
-        </div>
-      </header>
+        let state = {
+            modules: [
+                {
+                    id: generateId(),
+                    title: 'Module 1',
+                    objectives: [{ id: defaultObjId, text: '' }],
+                    activities: [{ id: defaultActId, type: 'activity', text: '', description: '', objectiveIds: [], isRSI: false }]
+                }
+            ],
+            showBlooms: true,
+            showInfoModal: false,
+            loadingStates: { objectives: {}, objectiveActivities: {}, moduleObjectives: {}, moduleAlignment: {}, aligningObjective: {} },
+            appError: null,
+            appSuccess: null,
+            expandedBlooms: {}, // Track which Bloom's category is expanded
+            copiedVerb: null
+        };
 
-      {/* Global Error Notification */}
-      {appError && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-rose-600 text-white max-w-2xl`}>
-          <AlertTriangle size={20} className="shrink-0" />
-          <span className="text-sm font-medium leading-tight">{appError}</span>
-          <button onClick={() => setAppError(null)} className="ml-2 hover:bg-rose-500 p-1 rounded-full"><X size={16}/></button>
-        </div>
-      )}
+        const updateState = (updates) => {
+            state = { ...state, ...updates };
+        };
 
-      {/* Global Success Notification */}
-      {appSuccess && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-green-600 text-white`}>
-          <CheckCircle size={20} className="shrink-0" />
-          <span className="text-sm font-medium">{appSuccess}</span>
-        </div>
-      )}
+        // UI Feedback Helpers
+        const showError = (msg, duration = 4000) => {
+            updateState({ appError: msg });
+            renderNotifications();
+            if (duration) setTimeout(() => { updateState({ appError: null }); renderNotifications(); }, duration);
+        };
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          {modules.map((module, index) => (
-            <ModuleCard 
-              key={module.id}
-              module={module}
-              index={index}
-              updateModuleTitle={updateModuleTitle}
-              deleteModule={deleteModule}
-              addObjective={addObjective}
-              updateObjective={updateObjective}
-              deleteObjective={deleteObjective}
-              addActivity={addActivity}
-              updateActivity={updateActivity}
-              updateActivityDescription={updateActivityDescription}
-              toggleActivityRSI={toggleActivityRSI}
-              handleToggleAlignmentWithValidation={handleToggleAlignmentWithValidation}
-              deleteActivity={deleteActivity}
-              handleRewriteObjective={handleRewriteObjective}
-              handleSuggestActivitiesForObjective={handleSuggestActivitiesForObjective}
-              handleSuggestObjectives={handleSuggestObjectives}
-              handleAutoAlignModule={handleAutoAlignModule}
-              isGeneratingObjectiveList={loadingStates.moduleObjectives?.[module.id]}
-              isGeneratingObjective={loadingStates.objectives}
-              isGeneratingActivitiesForObjective={loadingStates.objectiveActivities}
-              isAligningModule={loadingStates.moduleAlignment?.[module.id]}
-              aligningObjectiveState={loadingStates.aligningObjective}
-            />
-          ))}
+        const showSuccess = (msg, duration = 4000) => {
+            updateState({ appSuccess: msg });
+            renderNotifications();
+            if (duration) setTimeout(() => { updateState({ appSuccess: null }); renderNotifications(); }, duration);
+        };
 
-          <button 
-            onClick={addModule}
-            className="w-full py-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-medium hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-colors flex items-center justify-center gap-2"
-          >
-            <Plus size={20} />
-            Add New Module
-          </button>
-        </div>
+        // --- 4. Logic & AI Integrations ---
 
-        {/* Bloom's Taxonomy Sidebar */}
-        {showBlooms && (
-          <div className="w-80 border-l border-slate-200 bg-white overflow-y-auto flex-shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)]">
-            <div className="p-5">
-              <h2 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-                <Lightbulb className="text-amber-500" size={20} />
-                Bloom's Taxonomy
-              </h2>
-              <p className="text-xs text-slate-600 mb-6 bg-slate-100 p-3 rounded-lg border border-slate-200">
-                <strong>QM Standard 2.2:</strong> Module objectives must be measurable. Click a verb below to copy it. Avoid levels of learning like <em>"understand"</em> or <em>"remember"</em>.
-              </p>
-              
-              <div className="space-y-4">
-                {bloomsTaxonomy.map((level) => (
-                  <BloomsLevelCard key={level.level} data={level} />
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+        const analyzeObjective = (text) => {
+            if (!text) return { valid: true, warning: null };
+            const lowerText = text.toLowerCase();
+            for (const verb of unmeasurableVerbs) {
+                const regex = new RegExp(`\\b${verb}\\b`, 'i');
+                if (regex.test(lowerText)) {
+                    if (['understand', 'remember', 'understand the context of'].includes(verb)) {
+                        return { valid: false, warning: `"${verb.charAt(0).toUpperCase() + verb.slice(1)}" is a level of learning, not an acceptable measurable verb. Try an action verb from Bloom's Taxonomy.` };
+                    }
+                    return { valid: false, warning: `The phrasing "${verb}" is difficult to measure. Try using a specific action verb from Bloom's Taxonomy.` };
+                }
+            }
+            return { valid: true, warning: null };
+        };
 
-      {/* Info & Privacy Modal */}
-      {showInfoModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <ShieldCheck className="text-emerald-600" size={22} />
-                Privacy, Security & Help
-              </h2>
-              <button onClick={() => setShowInfoModal(false)} className="text-slate-400 hover:text-slate-600 p-1 transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-5 overflow-y-auto max-h-[70vh]">
-              <div>
-                <h3 className="font-semibold text-slate-800 mb-1">Is my data saved?</h3>
-                <p className="text-sm text-slate-600 leading-relaxed">
-                  No. This tool runs entirely in your local browser. <strong>Nothing you type is saved to a database.</strong> If you refresh or close the page, your data will be cleared unless you export it.
-                </p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-800 mb-1">How does import/export work?</h3>
-                <p className="text-sm text-slate-600 leading-relaxed">
-                  Use the <strong>Export CSV</strong> button to download your work to your computer. You can open this file in Excel or Sheets to view or edit. Use <strong>Import CSV</strong> to load a saved file back into this tool so you can continue working where you left off.
-                </p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-800 mb-1">What happens to data sent to the AI?</h3>
-                <p className="text-sm text-slate-600 leading-relaxed">
-                  When you click the "✨ Suggest" or "✨ Auto-Align All" buttons, the text you've provided is securely sent to the AI to generate a response. It is not used to train public AI models. However, to prevent any potential academic integrity issues, <strong>we recommend pasting rubrics, prompts, or topics instead of verbatim exam questions.</strong>
-                </p>
-              </div>
-              <div className="bg-blue-50 border border-blue-100 rounded-lg p-5 mt-2">
-                <h3 className="font-semibold text-blue-900 mb-1 flex items-center gap-2">
-                  <Mail size={18} /> Have questions?
-                </h3>
-                <p className="text-sm text-blue-800 mb-4">
-                  Need help aligning your course, fulfilling RSI requirements, or understanding QM standards?
-                </p>
-                <a 
-                  href="mailto:instructionaldesign@cf.edu" 
-                  className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 transition-colors"
-                >
-                  Contact Instructional Design
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        const callGeminiAPI = async (prompt, schema = null) => {
+            const apiKey = ""; // Left intentionally blank per instructions
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
-// --- Subcomponents ---
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+            if (schema) {
+                payload.generationConfig = { responseMimeType: "application/json", responseSchema: schema };
+            }
 
-function ModuleCard({ 
-  module, index, updateModuleTitle, deleteModule, 
-  addObjective, updateObjective, deleteObjective,
-  addActivity, updateActivity, updateActivityDescription, toggleActivityRSI, handleToggleAlignmentWithValidation, deleteActivity,
-  handleRewriteObjective, handleSuggestActivitiesForObjective, handleSuggestObjectives, handleAutoAlignModule,
-  isGeneratingObjectiveList, isGeneratingObjective, isGeneratingActivitiesForObjective, isAligningModule, aligningObjectiveState
-}) {
-  
-  // Calculate Alignment Health
-  const orphanObjectives = module.objectives.filter(obj => {
-    return !module.activities.some(act => act.objectiveIds.includes(obj.id));
-  });
+            let retries = 5;
+            let delay = 1000;
+            while (retries > 0) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const data = await response.json();
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    return schema ? JSON.parse(text) : text;
+                } catch (error) {
+                    retries--;
+                    if (retries === 0) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2;
+                }
+            }
+        };
 
-  const unalignedActivities = module.activities.filter(act => act.objectiveIds.length === 0);
-  const hasRSI = module.activities.some(act => act.isRSI);
-  const unmeasurableCount = module.objectives.filter(obj => !analyzeObjective(obj.text).valid).length;
+        const exportCSV = () => {
+            let csvContent = "\uFEFFModule,Type,Content,Details,Aligned Objectives,RSI\n";
+            state.modules.forEach((m) => {
+                const modTitle = `"${(m.title || '').replace(/"/g, '""')}"`;
+                m.objectives.forEach((o) => {
+                    const text = `"${(o.text || '').replace(/"/g, '""')}"`;
+                    csvContent += `${modTitle},Objective,${text},,, \n`;
+                });
+                m.activities.forEach((a) => {
+                    const text = `"${(a.text || '').replace(/"/g, '""')}"`;
+                    const details = `"${(a.description || '').replace(/"/g, '""')}"`;
+                    const aligned = `"${a.objectiveIds.map(id => {
+                        const idx = m.objectives.findIndex(o => o.id === id);
+                        return idx !== -1 ? `O${idx + 1}` : '';
+                    }).filter(Boolean).join(', ')}"`;
+                    const rsi = a.isRSI ? 'Yes' : 'No';
+                    const type = a.type === 'assessment' ? 'Assessment' : 'Activity';
+                    csvContent += `${modTitle},${type},${text},${details},${aligned},${rsi}\n`;
+                });
+            });
 
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-      {/* Module Header */}
-      <div className="bg-slate-50 border-b border-slate-200 p-4 flex items-center justify-between group">
-        <div className="flex-1 flex items-center gap-3">
-          <span className="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-lg text-sm">
-            M{index + 1}
-          </span>
-          <input
-            type="text"
-            value={module.title}
-            onChange={(e) => updateModuleTitle(module.id, e.target.value)}
-            className="flex-1 bg-transparent font-semibold text-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1"
-            placeholder="Module Title"
-          />
-        </div>
-        <button 
-          onClick={() => deleteModule(module.id)}
-          className="text-slate-400 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity"
-          title="Delete Module"
-        >
-          <Trash2 size={18} />
-        </button>
-      </div>
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", "course_alignment.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
 
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Left Column: Objectives */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-              <Target size={18} className="text-blue-500" />
-              Learning Objectives
-            </h3>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleSuggestObjectives(module.id)}
-                disabled={isGeneratingObjectiveList || module.activities.filter(a => a.text.trim()).length === 0}
-                title={module.activities.filter(a => a.text.trim()).length === 0 ? "Add coursework first to get AI suggestions" : "Auto-generate QM aligned objectives based on your coursework"}
-                className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-colors"
-              >
-                {isGeneratingObjectiveList ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                ✨ Suggest
-              </button>
-              <button 
-                onClick={() => addObjective(module.id)}
-                className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded transition-colors"
-              >
-                <Plus size={14} /> Add Objective
-              </button>
-            </div>
-          </div>
-          
-          <div className="space-y-3">
-            {module.objectives.length === 0 && (
-              <p className="text-sm text-slate-500 italic text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                No objectives added yet.
-              </p>
-            )}
-            {module.objectives.map((obj, i) => (
-              <ObjectiveInput 
-                key={obj.id} 
-                objective={obj} 
-                index={i} 
-                onChange={(text) => updateObjective(module.id, obj.id, text)}
-                onDelete={() => deleteObjective(module.id, obj.id)}
-                onRewrite={() => handleRewriteObjective(module.id, obj.id, obj.text)}
-                onSuggestActivities={() => handleSuggestActivitiesForObjective(module.id, obj.id, obj.text)}
-                isGenerating={isGeneratingObjective?.[obj.id]}
-                isGeneratingActivities={isGeneratingActivitiesForObjective?.[obj.id]}
-              />
-            ))}
-          </div>
-        </div>
+        const handleFileUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
 
-        {/* Right Column: Activities/Assessments */}
-        <div>
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-              <Activity size={18} className="text-green-500" />
-              Coursework
-            </h3>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleAutoAlignModule(module.id)}
-                disabled={isAligningModule || module.activities.length === 0 || module.objectives.length === 0}
-                title="Auto-evaluate and match ALL activities to the correct objectives in this module"
-                className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-colors shadow-sm border border-indigo-100"
-              >
-                {isAligningModule ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                ✨ Auto-Align All
-              </button>
-              <button 
-                onClick={() => addActivity(module.id, 'activity')}
-                className="text-xs font-medium text-green-600 hover:text-green-800 flex items-center gap-1 bg-green-50 px-2 py-1 rounded"
-              >
-                <Plus size={14} /> Act
-              </button>
-              <button 
-                onClick={() => addActivity(module.id, 'assessment')}
-                className="text-xs font-medium text-purple-600 hover:text-purple-800 flex items-center gap-1 bg-purple-50 px-2 py-1 rounded"
-              >
-                <Plus size={14} /> Eval
-              </button>
-            </div>
-          </div>
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target.result;
+                const rows = text.split(/\r?\n/).filter(row => row.trim());
+                let importedModulesMap = new Map();
 
-          <div className="space-y-4">
-            {module.activities.length === 0 && (
-              <p className="text-sm text-slate-500 italic text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                No coursework added yet. Hover over an objective and click the <Activity size={12} className="inline"/> icon to auto-generate activities!
-              </p>
-            )}
-            {module.activities.map((act) => (
-              <ActivityInput 
-                key={act.id} 
-                activity={act} 
-                objectives={module.objectives}
-                aligningObjectiveState={aligningObjectiveState}
-                onChange={(text) => updateActivity(module.id, act.id, text)}
-                onDescriptionChange={(desc) => updateActivityDescription(module.id, act.id, desc)}
-                onToggleAlignment={(objId) => handleToggleAlignmentWithValidation(module.id, act.id, objId)}
-                onToggleRSI={() => toggleActivityRSI(module.id, act.id)}
-                onDelete={() => deleteActivity(module.id, act.id)}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
+                const parseCSVRow = (str) => {
+                    let result = [];
+                    let inQuotes = false;
+                    let current = '';
+                    for (let i = 0; i < str.length; i++) {
+                        let char = str[i];
+                        if (char === '"') { inQuotes = !inQuotes; } 
+                        else if (char === ',' && !inQuotes) { result.push(current); current = ''; } 
+                        else { current += char; }
+                    }
+                    result.push(current);
+                    return result.map(s => s.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+                };
 
-      {/* Alignment Dashboard Footer */}
-      {(module.objectives.length > 0 || module.activities.length > 0) && (
-        <div className="bg-slate-100/50 border-t border-slate-200 p-5">
-          <h4 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
-            <Activity size={16} /> Course Health & Compliance Dashboard
-          </h4>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            
-            {/* QM 2.1 / 2.2 Objective Status */}
-            <div className={`p-3 rounded-lg border text-sm flex items-start gap-3 ${unmeasurableCount === 0 ? 'bg-white border-green-200' : 'bg-white border-rose-200'}`}>
-               {unmeasurableCount === 0 ? (
-                <CheckCircle className="text-green-500 mt-0.5 shrink-0" size={18} />
-              ) : (
-                <AlertTriangle className="text-rose-500 mt-0.5 shrink-0" size={18} />
-              )}
-              <div>
-                <p className={`font-semibold ${unmeasurableCount === 0 ? 'text-green-800' : 'text-rose-800'}`}>QM Standards 2.1 & 2.2</p>
-                {unmeasurableCount === 0 ? (
-                  <p className="text-slate-600 text-xs mt-1">All objectives appear measurable.</p>
-                ) : (
-                  <p className="text-rose-600 text-xs mt-1">You have {unmeasurableCount} objective(s) containing unmeasurable verbs.</p>
-                )}
-              </div>
-            </div>
+                const startIndex = rows[0].toLowerCase().includes('module') ? 1 : 0;
 
-            {/* QM 2.4 Alignment Status */}
-            <div className={`p-3 rounded-lg border text-sm flex items-start gap-3 ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? 'bg-white border-green-200' : 'bg-white border-amber-300 shadow-sm'}`}>
-              {(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? (
-                <CheckCircle className="text-green-500 mt-0.5 shrink-0" size={18} />
-              ) : (
-                <AlertTriangle className="text-amber-500 mt-0.5 shrink-0" size={18} />
-              )}
-              <div>
-                <p className={`font-semibold ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? 'text-green-800' : 'text-amber-900'}`}>QM Standard 2.4 Alignment</p>
-                {(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? (
-                  <p className="text-slate-600 text-xs mt-1">Clear relationship between all objectives and coursework.</p>
-                ) : (
-                  <div className="text-amber-800 text-xs mt-1">
-                    {orphanObjectives.length > 0 && <p className="font-medium mt-1">Missing Assessments for:</p>}
-                    <ul className="list-disc pl-4 space-y-0.5">
-                      {orphanObjectives.map((obj, idx) => (
-                        <li key={idx} className="truncate max-w-[150px]" title={obj.text}>O{module.objectives.indexOf(obj) + 1}</li>
-                      ))}
-                    </ul>
-                    {unalignedActivities.length > 0 && <p className="font-medium mt-1">Unaligned Coursework:</p>}
-                    <ul className="list-disc pl-4 space-y-0.5">
-                      {unalignedActivities.map((act, idx) => (
-                        <li key={idx} className="truncate max-w-[150px]" title={act.text}>{act.text || '(Empty)'}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
+                for (let i = startIndex; i < rows.length; i++) {
+                    const cols = parseCSVRow(rows[i]);
+                    if (cols.length < 3) continue;
 
-            {/* RSI Status */}
-            <div className={`p-3 rounded-lg border text-sm flex items-start gap-3 ${hasRSI ? 'bg-white border-green-200' : 'bg-white border-blue-300 shadow-sm'}`}>
-              {hasRSI ? (
-                <CheckCircle className="text-green-500 mt-0.5 shrink-0" size={18} />
-              ) : (
-                <MessageSquare className="text-blue-500 mt-0.5 shrink-0" size={18} />
-              )}
-              <div>
-                 <p className={`font-semibold ${hasRSI ? 'text-green-800' : 'text-blue-900'}`}>RSI Requirement</p>
-                 {hasRSI ? (
-                   <p className="text-slate-600 text-xs mt-1">Module includes Regular and Substantive Interaction.</p>
-                 ) : (
-                   <p className="text-blue-800 text-xs mt-1">Flag at least one activity to track substantive instructor engagement (e.g., feedback, discussion).</p>
-                 )}
-              </div>
-            </div>
+                    const modTitle = cols[0] || 'Imported Module';
+                    const type = (cols[1] || '').toLowerCase();
+                    const content = cols[2] || '';
+                    const details = cols[3] || '';
+                    const rsi = (cols[5] || '').toLowerCase() === 'yes';
 
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+                    if (!importedModulesMap.has(modTitle)) {
+                        importedModulesMap.set(modTitle, { id: generateId(), title: modTitle, objectives: [], activities: [] });
+                    }
+                    
+                    const mod = importedModulesMap.get(modTitle);
+                    if (type === 'objective') {
+                        mod.objectives.push({ id: generateId(), text: content });
+                    } else if (type === 'activity' || type === 'assessment') {
+                        mod.activities.push({
+                            id: generateId(), type: type, text: content, description: details, objectiveIds: [], isRSI: rsi
+                        });
+                    }
+                }
 
-function ObjectiveInput({ objective, index, onChange, onDelete, onRewrite, onSuggestActivities, isGenerating, isGeneratingActivities }) {
-  const analysis = useMemo(() => analyzeObjective(objective.text), [objective.text]);
+                const newModules = Array.from(importedModulesMap.values());
+                if (newModules.length > 0) {
+                    const isDefault = state.modules.length === 1 && state.modules[0].objectives.length === 1 && state.modules[0].objectives[0].text === '' && state.modules[0].activities.length === 1 && state.modules[0].activities[0].text === '';
+                    updateState({ modules: isDefault ? newModules : [...state.modules, ...newModules] });
+                    showSuccess("CSV Imported Successfully! You can now use 'Auto-Align All' to map your items.");
+                    renderMainContent(); // Re-render everything
+                }
+                event.target.value = ''; // Reset input
+            };
+            reader.readAsText(file);
+        };
 
-  return (
-    <div className="relative group">
-      <div className="flex items-start gap-2">
-        <span className="mt-2.5 text-xs font-bold text-slate-400 w-6 shrink-0">
-          O{index + 1}
-        </span>
-        <div className="flex-1 relative">
-          <textarea
-            value={objective.text}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="e.g., Identify the basic concepts..."
-            className={`w-full text-sm rounded-lg border ${analysis.valid ? 'border-slate-300 focus:border-blue-500' : 'border-rose-400 focus:border-rose-500 bg-rose-50'} focus:ring-2 focus:ring-opacity-20 focus:outline-none px-3 py-2 min-h-[60px] resize-none transition-colors ${isGenerating ? 'opacity-50' : ''}`}
-            disabled={isGenerating}
-          />
-          
-          <div className="absolute right-2 top-2 flex items-center gap-2">
-            {/* Warning Icon - Always visible if invalid */}
-            {!analysis.valid && !isGenerating && (
-              <div className="text-rose-500 group/tooltip relative cursor-help">
-                <AlertTriangle size={18} />
-                <div className="absolute right-0 top-full mt-1 w-64 bg-slate-800 text-white text-xs rounded shadow-lg p-3 opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-20 font-medium">
-                  {analysis.warning}
+        // --- 5. DOM Rendering Functions ---
+
+        const renderNotifications = () => {
+            const container = document.getElementById('notifications-container');
+            if (!container) return;
+            let html = '';
+            if (state.appError) {
+                html += `
+                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-rose-600 text-white max-w-2xl">
+                        ${renderIcon('AlertTriangle', 20, 'shrink-0')}
+                        <span class="text-sm font-medium leading-tight">${escapeHTML(state.appError)}</span>
+                        <button onclick="dismissError()" class="ml-2 hover:bg-rose-500 p-1 rounded-full">${renderIcon('X', 16)}</button>
+                    </div>`;
+            }
+            if (state.appSuccess) {
+                html += `
+                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-green-600 text-white">
+                        ${renderIcon('CheckCircle', 20, 'shrink-0')}
+                        <span class="text-sm font-medium">${escapeHTML(state.appSuccess)}</span>
+                    </div>`;
+            }
+            container.innerHTML = html;
+        };
+
+        window.dismissError = () => { updateState({ appError: null }); renderNotifications(); };
+
+        const renderHeader = () => `
+            <header class="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10 shadow-sm">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                        ${renderIcon('Target', 24, 'text-blue-600')}
+                        Instructional Alignment Builder
+                    </h1>
+                    <p class="text-sm text-slate-500 mt-1">Design measurable objectives, map coursework, and verify QM/RSI compliance.</p>
                 </div>
-              </div>
-            )}
+                <div class="flex flex-wrap items-center gap-2">
+                    <input type="file" accept=".csv" id="csv-upload" class="hidden" />
+                    <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-sm">
+                        <button id="btn-import" title="Import from CSV" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-slate-600 hover:bg-white hover:text-slate-800 transition-colors">
+                            ${renderIcon('Upload', 16)} <span class="text-sm hidden lg:inline">Import CSV</span>
+                        </button>
+                        <button id="btn-export" title="Export to CSV" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-slate-600 hover:bg-white hover:text-slate-800 transition-colors">
+                            ${renderIcon('Download', 16)} <span class="text-sm hidden lg:inline">Export CSV</span>
+                        </button>
+                    </div>
+                    <div class="h-6 w-px bg-slate-300 mx-1 hidden md:block"></div>
+                    <button id="btn-info" class="flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 transition-colors shadow-sm">
+                        ${renderIcon('ShieldCheck', 18, 'text-emerald-600')}
+                        <span class="hidden sm:inline">Privacy & Help</span>
+                    </button>
+                    <button id="btn-toggle-blooms" class="flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-colors shadow-sm ${state.showBlooms ? 'bg-blue-100 text-blue-700' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}">
+                        ${renderIcon('BookOpen', 18)}
+                        <span class="hidden sm:inline">${state.showBlooms ? 'Hide Guide' : 'Show Guide'}</span>
+                    </button>
+                </div>
+            </header>
+        `;
+
+        const renderInfoModal = () => {
+            if (!state.showInfoModal) return '';
+            return `
+                <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden flex flex-col">
+                        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                ${renderIcon('ShieldCheck', 22, 'text-emerald-600')} Privacy, Security & Help
+                            </h2>
+                            <button id="btn-close-info" class="text-slate-400 hover:text-slate-600 p-1 transition-colors">${renderIcon('X', 20)}</button>
+                        </div>
+                        <div class="p-6 space-y-5 overflow-y-auto max-h-[70vh]">
+                            <div>
+                                <h3 class="font-semibold text-slate-800 mb-1">Is my data saved?</h3>
+                                <p class="text-sm text-slate-600 leading-relaxed">No. This tool runs entirely in your local browser. <strong>Nothing you type is saved to a database.</strong> If you refresh or close the page, your data will be cleared unless you export it.</p>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-slate-800 mb-1">How does import/export work?</h3>
+                                <p class="text-sm text-slate-600 leading-relaxed">Use the <strong>Export CSV</strong> button to download your work to your computer. You can open this file in Excel or Sheets to view or edit. Use <strong>Import CSV</strong> to load a saved file back into this tool so you can continue working where you left off.</p>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-slate-800 mb-1">What happens to data sent to the AI?</h3>
+                                <p class="text-sm text-slate-600 leading-relaxed">When you click the "✨ Suggest" or "✨ Auto-Align All" buttons, the text you've provided is securely sent to the AI to generate a response. It is not used to train public AI models. However, to prevent any potential academic integrity issues, <strong>we recommend pasting rubrics, prompts, or topics instead of verbatim exam questions.</strong></p>
+                            </div>
+                            <div class="bg-blue-50 border border-blue-100 rounded-lg p-5 mt-2">
+                                <h3 class="font-semibold text-blue-900 mb-1 flex items-center gap-2">${renderIcon('Mail', 18)} Have questions?</h3>
+                                <p class="text-sm text-blue-800 mb-4">Need help aligning your course, fulfilling RSI requirements, or understanding QM standards?</p>
+                                <a href="mailto:instructionaldesign@cf.edu" class="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 transition-colors">Contact Instructional Design</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderBloomsSidebar = () => {
+            if (!state.showBlooms) return '';
+            let levelsHTML = bloomsTaxonomy.map(data => {
+                const isOpen = state.expandedBlooms[data.level];
+                let verbsHTML = data.verbs.map(verb => {
+                    const isCopied = state.copiedVerb === verb;
+                    return `
+                        <button class="btn-copy-verb relative text-[11px] px-2 py-1 bg-white border border-slate-200 rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-slate-600 transition-colors flex items-center gap-1 group/btn" data-verb="${escapeHTML(verb)}">
+                            ${escapeHTML(verb)}
+                            ${isCopied ? renderIcon('CheckCircle', 10, 'text-green-500') : renderIcon('Copy', 10, 'text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity')}
+                        </button>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="border rounded-lg overflow-hidden transition-all duration-200 ${isOpen ? 'shadow-md border-slate-300' : 'border-slate-200'}">
+                        <button class="btn-toggle-bloom-level w-full flex items-center justify-between p-3 text-left ${data.color} hover:brightness-95 transition-all" data-level="${data.level}">
+                            <div><h4 class="font-bold text-sm">${data.level}</h4></div>
+                            ${isOpen ? renderIcon('ChevronDown', 18) : renderIcon('ChevronRight', 18)}
+                        </button>
+                        ${isOpen ? `
+                            <div class="bg-white border-t border-slate-100 flex flex-col">
+                                <p class="text-xs text-slate-600 p-3 pb-2 italic border-b border-slate-100 bg-slate-50/50">${data.description}</p>
+                                <div class="p-3 flex flex-wrap gap-1.5">${verbsHTML}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="w-80 border-l border-slate-200 bg-white overflow-y-auto flex-shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)]">
+                    <div class="p-5">
+                        <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">${renderIcon('Lightbulb', 20, 'text-amber-500')} Bloom's Taxonomy</h2>
+                        <p class="text-xs text-slate-600 mb-6 bg-slate-100 p-3 rounded-lg border border-slate-200">
+                            <strong>QM Standard 2.2:</strong> Module objectives must be measurable. Click a verb below to copy it. Avoid levels of learning like <em>"understand"</em> or <em>"remember"</em>.
+                        </p>
+                        <div class="space-y-4">${levelsHTML}</div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderObjectiveInput = (obj, index, module) => {
+            const analysis = analyzeObjective(obj.text);
+            const isGenerating = state.loadingStates.objectives[obj.id];
+            const isGeneratingActs = state.loadingStates.objectiveActivities[obj.id];
             
-            {/* AI Action Buttons - Reveal on Hover */}
-            {objective.text.trim() && (
-               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-white/90 backdrop-blur px-1 py-0.5 rounded shadow-sm border border-slate-100">
-                 <button
-                   onClick={onSuggestActivities}
-                   disabled={isGenerating || isGeneratingActivities}
-                   title="✨ Auto-generate Coursework & Assessments perfectly aligned to this objective"
-                   className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                 >
-                   {isGeneratingActivities ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
-                 </button>
-                 <div className="w-px h-4 bg-slate-200"></div>
-                 <button
-                   onClick={onRewrite}
-                   disabled={isGenerating || isGeneratingActivities}
-                   title="✨ Rewrite objective with AI to meet QM Standards"
-                   className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                 >
-                   {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                 </button>
-               </div>
-            )}
-          </div>
-        </div>
-        <button 
-          onClick={onDelete}
-          className="mt-2 text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <Trash2 size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
+            let warningHTML = '';
+            if (!analysis.valid && !isGenerating) {
+                warningHTML = `
+                    <div class="text-rose-500 group/tooltip relative cursor-help">
+                        ${renderIcon('AlertTriangle', 18)}
+                        <div class="absolute right-0 top-full mt-1 w-64 bg-slate-800 text-white text-xs rounded shadow-lg p-3 opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-20 font-medium">
+                            ${escapeHTML(analysis.warning)}
+                        </div>
+                    </div>
+                `;
+            }
 
-function ActivityInput({ activity, objectives, aligningObjectiveState, onChange, onDescriptionChange, onToggleAlignment, onToggleRSI, onDelete }) {
-  const isAssessment = activity.type === 'assessment';
-  
-  return (
-    <div className={`p-3 rounded-lg border ${isAssessment ? 'border-purple-200 bg-purple-50/40' : 'border-green-200 bg-green-50/40'} group`}>
-      <div className="flex items-start gap-2 mb-3">
-        <span className={`mt-2 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${isAssessment ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>
-          {isAssessment ? 'Eval' : 'Act'}
-        </span>
-        <div className="flex-1">
-          <input
-            type="text"
-            value={activity.text}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={isAssessment ? "e.g., Midterm Exam" : "e.g., Read Chapter 1 & Post to Discussion"}
-            className="w-full bg-white text-sm rounded border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none px-2 py-1.5"
-          />
-          
-          <textarea
-            value={activity.description || ''}
-            onChange={(e) => onDescriptionChange(e.target.value)}
-            placeholder={isAssessment ? "Optional: Paste assessment questions or rubric details here for better AI alignment..." : "Optional: Elaborate on the discussion prompt, instructions, or context..."}
-            className="w-full mt-2 bg-white/60 text-xs rounded border border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 focus:outline-none px-2 py-1.5 min-h-[60px] resize-y"
-          />
-          
-          {/* RSI Toggle - Only show for Activities generally, though can be used for feedback assessments */}
-          {!isAssessment && (
-             <label className="flex items-center gap-2 mt-2 cursor-pointer w-max group/rsi">
-               <input 
-                  type="checkbox" 
-                  checked={activity.isRSI}
-                  onChange={onToggleRSI}
-                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-               />
-               <span className="text-xs text-slate-600 font-medium group-hover/rsi:text-blue-700 transition-colors">
-                  Includes Substantive Interaction (RSI)
-               </span>
-               <Info size={12} className="text-slate-400" title="e.g. Moderated discussion, direct instruction, or substantive feedback" />
-             </label>
-          )}
-        </div>
-        <button 
-          onClick={onDelete}
-          className="mt-1.5 text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <Trash2 size={16} />
-        </button>
-      </div>
+            let aiButtonsHTML = '';
+            if (obj.text.trim()) {
+                aiButtonsHTML = `
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-white/90 backdrop-blur px-1 py-0.5 rounded shadow-sm border border-slate-100">
+                        <button class="btn-suggest-acts text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Auto-generate Coursework & Assessments perfectly aligned to this objective" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
+                            ${isGeneratingActs ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Activity', 14)}
+                        </button>
+                        <div class="w-px h-4 bg-slate-200"></div>
+                        <button class="btn-rewrite-obj text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Rewrite objective with AI to meet QM Standards" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
+                            ${isGenerating ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)}
+                        </button>
+                    </div>
+                `;
+            }
 
-      {/* Alignment Toggles */}
-      <div className="ml-10 pt-2 border-t border-slate-200/50">
-        <p className="text-xs text-slate-500 mb-1.5 font-medium flex items-center gap-1">
-          QM 2.4 Alignment:
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          {objectives.length === 0 && (
-            <span className="text-xs text-slate-400 italic">Add objectives first</span>
-          )}
-          {objectives.map((obj, idx) => {
-            const isAligned = activity.objectiveIds.includes(obj.id);
-            const isAligningThis = aligningObjectiveState?.[`${activity.id}-${obj.id}`];
+            return `
+                <div class="relative group">
+                    <div class="flex items-start gap-2">
+                        <span class="mt-2.5 text-xs font-bold text-slate-400 w-6 shrink-0">O${index + 1}</span>
+                        <div class="flex-1 relative">
+                            <textarea class="input-objective w-full text-sm rounded-lg border ${analysis.valid ? 'border-slate-300 focus:border-blue-500' : 'border-rose-400 focus:border-rose-500 bg-rose-50'} focus:ring-2 focus:ring-opacity-20 focus:outline-none px-3 py-2 min-h-[60px] resize-none transition-colors ${isGenerating ? 'opacity-50' : ''}" placeholder="e.g., Identify the basic concepts..." data-mod-id="${module.id}" data-obj-id="${obj.id}" ${isGenerating ? 'disabled' : ''}>${escapeHTML(obj.text)}</textarea>
+                            <div class="objective-warning-container absolute right-2 top-2 flex items-center gap-2" id="warning-${obj.id}">
+                                ${warningHTML}
+                                ${aiButtonsHTML}
+                            </div>
+                        </div>
+                        <button class="btn-del-obj mt-2 text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity" data-mod-id="${module.id}" data-obj-id="${obj.id}">${renderIcon('Trash2', 16)}</button>
+                    </div>
+                </div>
+            `;
+        };
 
-            return (
-              <button
-                key={obj.id}
-                onClick={() => onToggleAlignment(obj.id)}
-                disabled={isAligningThis}
-                title={obj.text || 'Empty objective'}
-                className={`text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${
-                  isAligned 
-                    ? 'bg-blue-600 text-white border-blue-700 shadow-inner' 
-                    : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600'
-                } ${isAligningThis ? 'opacity-70 cursor-wait' : ''}`}
-              >
-                {isAligningThis && <Loader2 size={10} className="animate-spin" />}
-                O{idx + 1}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
+        const renderActivityInput = (activity, module) => {
+            const isAssessment = activity.type === 'assessment';
+            
+            let alignmentPillsHTML = module.objectives.length === 0 
+                ? '<span class="text-xs text-slate-400 italic">Add objectives first</span>'
+                : module.objectives.map((obj, idx) => {
+                    const isAligned = activity.objectiveIds.includes(obj.id);
+                    const isAligningThis = state.loadingStates.aligningObjective[`${activity.id}-${obj.id}`];
+                    const btnClass = isAligned ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600';
+                    return `
+                        <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass} ${isAligningThis ? 'opacity-70 cursor-wait' : ''}" data-mod-id="${module.id}" data-act-id="${activity.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}" ${isAligningThis ? 'disabled' : ''}>
+                            ${isAligningThis ? renderIcon('Loader2', 10, 'animate-spin') : ''} O${idx + 1}
+                        </button>
+                    `;
+                }).join('');
 
-function BloomsLevelCard({ data }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [copiedVerb, setCopiedVerb] = useState(null);
+            return `
+                <div class="p-3 rounded-lg border ${isAssessment ? 'border-purple-200 bg-purple-50/40' : 'border-green-200 bg-green-50/40'} group">
+                    <div class="flex items-start gap-2 mb-3">
+                        <span class="mt-2 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${isAssessment ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}">${isAssessment ? 'Eval' : 'Act'}</span>
+                        <div class="flex-1">
+                            <input type="text" class="input-activity-text w-full bg-white text-sm rounded border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none px-2 py-1.5" placeholder="${isAssessment ? 'e.g., Midterm Exam' : 'e.g., Read Chapter 1 & Post to Discussion'}" value="${escapeHTML(activity.text)}" data-mod-id="${module.id}" data-act-id="${activity.id}" />
+                            <textarea class="input-activity-desc w-full mt-2 bg-white/60 text-xs rounded border border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 focus:outline-none px-2 py-1.5 min-h-[60px] resize-y" placeholder="${isAssessment ? 'Optional: Paste assessment questions or rubric details here for better AI alignment...' : 'Optional: Elaborate on the discussion prompt, instructions, or context...'}" data-mod-id="${module.id}" data-act-id="${activity.id}">${escapeHTML(activity.description)}</textarea>
+                            ${!isAssessment ? `
+                                <label class="flex items-center gap-2 mt-2 cursor-pointer w-max group/rsi">
+                                    <input type="checkbox" class="input-rsi rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" ${activity.isRSI ? 'checked' : ''} data-mod-id="${module.id}" data-act-id="${activity.id}" />
+                                    <span class="text-xs text-slate-600 font-medium group-hover/rsi:text-blue-700 transition-colors">Includes Substantive Interaction (RSI)</span>
+                                    ${renderIcon('Info', 12, 'text-slate-400')}
+                                </label>
+                            ` : ''}
+                        </div>
+                        <button class="btn-del-act mt-1.5 text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity" data-mod-id="${module.id}" data-act-id="${activity.id}">${renderIcon('Trash2', 16)}</button>
+                    </div>
+                    <div class="ml-10 pt-2 border-t border-slate-200/50" id="alignments-${activity.id}">
+                        <p class="text-xs text-slate-500 mb-1.5 font-medium flex items-center gap-1">QM 2.4 Alignment:</p>
+                        <div class="flex flex-wrap gap-1.5">${alignmentPillsHTML}</div>
+                    </div>
+                </div>
+            `;
+        };
 
-  const handleCopy = (verb) => {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(verb);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = verb;
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-      }
-      setCopiedVerb(verb);
-      setTimeout(() => setCopiedVerb(null), 1500);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
+        const renderDashboardInner = (module) => {
+            const orphanObjectives = module.objectives.filter(obj => !module.activities.some(act => act.objectiveIds.includes(obj.id)));
+            const unalignedActivities = module.activities.filter(act => act.objectiveIds.length === 0);
+            const hasRSI = module.activities.some(act => act.isRSI);
+            const unmeasurableCount = module.objectives.filter(obj => !analyzeObjective(obj.text).valid).length;
 
-  return (
-    <div className={`border rounded-lg overflow-hidden transition-all duration-200 ${isOpen ? 'shadow-md border-slate-300' : 'border-slate-200'}`}>
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full flex items-center justify-between p-3 text-left ${data.color} hover:brightness-95 transition-all`}
-      >
-        <div>
-          <h4 className="font-bold text-sm">{data.level}</h4>
-        </div>
-        {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-      </button>
-      
-      {isOpen && (
-        <div className="bg-white border-t border-slate-100 flex flex-col">
-          <p className="text-xs text-slate-600 p-3 pb-2 italic border-b border-slate-100 bg-slate-50/50">
-            {data.description}
-          </p>
-          <div className="p-3 flex flex-wrap gap-1.5">
-            {data.verbs.map(verb => (
-              <button
-                key={verb}
-                onClick={() => handleCopy(verb)}
-                className="relative text-[11px] px-2 py-1 bg-white border border-slate-200 rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-slate-600 transition-colors flex items-center gap-1 group/btn"
-              >
-                {verb}
-                {copiedVerb === verb ? (
-                  <CheckCircle size={10} className="text-green-500" />
-                ) : (
-                  <Copy size={10} className="text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+            if (module.objectives.length === 0 && module.activities.length === 0) return '';
+
+            return `
+                <div class="bg-slate-100/50 border-t border-slate-200 p-5">
+                    <h4 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">${renderIcon('Activity', 16)} Course Health & Compliance Dashboard</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        
+                        <div class="p-3 rounded-lg border text-sm flex items-start gap-3 ${unmeasurableCount === 0 ? 'bg-white border-green-200' : 'bg-white border-rose-200'}">
+                            ${unmeasurableCount === 0 ? renderIcon('CheckCircle', 18, 'text-green-500 mt-0.5 shrink-0') : renderIcon('AlertTriangle', 18, 'text-rose-500 mt-0.5 shrink-0')}
+                            <div>
+                                <p class="font-semibold ${unmeasurableCount === 0 ? 'text-green-800' : 'text-rose-800'}">QM Standards 2.1 & 2.2</p>
+                                <p class="${unmeasurableCount === 0 ? 'text-slate-600' : 'text-rose-600'} text-xs mt-1">
+                                    ${unmeasurableCount === 0 ? 'All objectives appear measurable.' : `You have ${unmeasurableCount} objective(s) containing unmeasurable verbs.`}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="p-3 rounded-lg border text-sm flex items-start gap-3 ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? 'bg-white border-green-200' : 'bg-white border-amber-300 shadow-sm'}">
+                            ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? renderIcon('CheckCircle', 18, 'text-green-500 mt-0.5 shrink-0') : renderIcon('AlertTriangle', 18, 'text-amber-500 mt-0.5 shrink-0')}
+                            <div>
+                                <p class="font-semibold ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? 'text-green-800' : 'text-amber-900'}">QM Standard 2.4 Alignment</p>
+                                ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) 
+                                    ? '<p class="text-slate-600 text-xs mt-1">Clear relationship between all objectives and coursework.</p>'
+                                    : `<div class="text-amber-800 text-xs mt-1">
+                                        ${orphanObjectives.length > 0 ? `<p class="font-medium mt-1">Missing Assessments for:</p><ul class="list-disc pl-4 space-y-0.5">${orphanObjectives.map(obj => `<li class="truncate max-w-[150px]" title="${escapeHTML(obj.text)}">O${module.objectives.findIndex(o => o.id === obj.id) + 1}</li>`).join('')}</ul>` : ''}
+                                        ${unalignedActivities.length > 0 ? `<p class="font-medium mt-1">Unaligned Coursework:</p><ul class="list-disc pl-4 space-y-0.5">${unalignedActivities.map(act => `<li class="truncate max-w-[150px]" title="${escapeHTML(act.text)}">${escapeHTML(act.text) || '(Empty)'}</li>`).join('')}</ul>` : ''}
+                                       </div>`
+                                }
+                            </div>
+                        </div>
+
+                        <div class="p-3 rounded-lg border text-sm flex items-start gap-3 ${hasRSI ? 'bg-white border-green-200' : 'bg-white border-blue-300 shadow-sm'}">
+                            ${hasRSI ? renderIcon('CheckCircle', 18, 'text-green-500 mt-0.5 shrink-0') : renderIcon('MessageSquare', 18, 'text-blue-500 mt-0.5 shrink-0')}
+                            <div>
+                                <p class="font-semibold ${hasRSI ? 'text-green-800' : 'text-blue-900'}">RSI Requirement</p>
+                                <p class="${hasRSI ? 'text-slate-600' : 'text-blue-800'} text-xs mt-1">
+                                    ${hasRSI ? 'Module includes Regular and Substantive Interaction.' : 'Flag at least one activity to track substantive instructor engagement (e.g., feedback, discussion).'}
+                                </p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderModuleCard = (module, index) => {
+            const isGeneratingObjList = state.loadingStates.moduleObjectives[module.id];
+            const isAligningModule = state.loadingStates.moduleAlignment[module.id];
+            const hasActivitiesText = module.activities.filter(a => a.text.trim()).length > 0;
+
+            return `
+                <div class="module-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden" id="module-${module.id}">
+                    <div class="bg-slate-50 border-b border-slate-200 p-4 flex items-center justify-between group">
+                        <div class="flex-1 flex items-center gap-3">
+                            <span class="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-lg text-sm">M${index + 1}</span>
+                            <input type="text" class="input-module-title flex-1 bg-transparent font-semibold text-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1" placeholder="Module Title" value="${escapeHTML(module.title)}" data-mod-id="${module.id}" />
+                        </div>
+                        <button class="btn-delete-mod text-slate-400 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity" data-mod-id="${module.id}">${renderIcon('Trash2', 18)}</button>
+                    </div>
+                    <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div>
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="font-semibold text-slate-800 flex items-center gap-2">${renderIcon('Target', 18, 'text-blue-500')} Learning Objectives</h3>
+                                <div class="flex gap-2">
+                                    <button class="btn-suggest-obj text-xs font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" title="${!hasActivitiesText ? 'Add coursework first to get AI suggestions' : 'Auto-generate QM aligned objectives based on your coursework'}" ${isGeneratingObjList || !hasActivitiesText ? 'disabled' : ''}>
+                                        ${isGeneratingObjList ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)} ✨ Suggest
+                                    </button>
+                                    <button class="btn-add-obj text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded transition-colors" data-mod-id="${module.id}">${renderIcon('Plus', 14)} Add Objective</button>
+                                </div>
+                            </div>
+                            <div class="space-y-3" id="objectives-list-${module.id}">
+                                ${module.objectives.length === 0 ? '<p class="text-sm text-slate-500 italic text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">No objectives added yet.</p>' : module.objectives.map((obj, i) => renderObjectiveInput(obj, i, module)).join('')}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                                <h3 class="font-semibold text-slate-800 flex items-center gap-2">${renderIcon('Activity', 18, 'text-green-500')} Coursework</h3>
+                                <div class="flex gap-2">
+                                    <button class="btn-auto-align-mod text-xs font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-colors shadow-sm border border-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" title="Auto-evaluate and match ALL activities to the correct objectives in this module" ${isAligningModule || module.activities.length === 0 || module.objectives.length === 0 ? 'disabled' : ''}>
+                                        ${isAligningModule ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)} ✨ Auto-Align All
+                                    </button>
+                                    <button class="btn-add-act text-xs font-medium text-green-600 hover:text-green-800 flex items-center gap-1 bg-green-50 px-2 py-1 rounded" data-mod-id="${module.id}" data-type="activity">${renderIcon('Plus', 14)} Act</button>
+                                    <button class="btn-add-act text-xs font-medium text-purple-600 hover:text-purple-800 flex items-center gap-1 bg-purple-50 px-2 py-1 rounded" data-mod-id="${module.id}" data-type="assessment">${renderIcon('Plus', 14)} Eval</button>
+                                </div>
+                            </div>
+                            <div class="space-y-4" id="activities-list-${module.id}">
+                                ${module.activities.length === 0 ? '<p class="text-sm text-slate-500 italic text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">No coursework added yet. Hover over an objective and click the activity icon to auto-generate activities!</p>' : module.activities.map(act => renderActivityInput(act, module)).join('')}
+                            </div>
+                        </div>
+                    </div>
+                    <div id="dashboard-${module.id}">${renderDashboardInner(module)}</div>
+                </div>
+            `;
+        };
+
+        const renderMainContent = () => {
+            const container = document.getElementById('main-content');
+            if (!container) return;
+            let html = '<div class="flex-1 overflow-y-auto p-6 space-y-8" id="modules-container">';
+            html += state.modules.map((m, i) => renderModuleCard(m, i)).join('');
+            html += `
+                <button id="btn-add-module" class="w-full py-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-medium hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-colors flex items-center justify-center gap-2">
+                    ${renderIcon('Plus', 20)} Add New Module
+                </button>
+            </div>`;
+            container.innerHTML = html;
+        };
+
+        const renderSidebar = () => {
+            const container = document.getElementById('sidebar-container');
+            if (!container) return;
+            container.innerHTML = renderBloomsSidebar();
+        };
+
+        const renderModals = () => {
+            const container = document.getElementById('modals-container');
+            if (!container) return;
+            container.innerHTML = renderInfoModal();
+        };
+
+        // Complete layout skeleton
+        const renderAppLayout = () => {
+            document.getElementById('app').innerHTML = `
+                <div id="notifications-container"></div>
+                <div id="header-container">${renderHeader()}</div>
+                <div class="flex-1 flex overflow-hidden relative">
+                    <div id="main-content" class="flex-1 flex flex-col h-full overflow-hidden"></div>
+                    <div id="sidebar-container" class="h-full flex-shrink-0"></div>
+                </div>
+                <div id="modals-container"></div>
+            `;
+            renderNotifications();
+            renderMainContent();
+            renderSidebar();
+            renderModals();
+        };
+
+        // --- 6. Event Handlers & Delegation ---
+
+        // Targeted DOM updaters to prevent focus loss
+        const updateObjectiveDOM = (moduleId, objId) => {
+            const module = state.modules.find(m => m.id === moduleId);
+            const objIndex = module.objectives.findIndex(o => o.id === objId);
+            const obj = module.objectives[objIndex];
+            
+            const analysis = analyzeObjective(obj.text);
+            const isGenerating = state.loadingStates.objectives[obj.id];
+            const isGeneratingActs = state.loadingStates.objectiveActivities[obj.id];
+
+            // Re-eval input classes
+            const input = document.querySelector(`textarea.input-objective[data-obj-id="${objId}"]`);
+            if (input) {
+                input.className = `input-objective w-full text-sm rounded-lg border ${analysis.valid ? 'border-slate-300 focus:border-blue-500' : 'border-rose-400 focus:border-rose-500 bg-rose-50'} focus:ring-2 focus:ring-opacity-20 focus:outline-none px-3 py-2 min-h-[60px] resize-none transition-colors ${isGenerating ? 'opacity-50' : ''}`;
+            }
+
+            // Update warning container inner HTML
+            const warningContainer = document.getElementById(`warning-${objId}`);
+            if (warningContainer) {
+                let warningHTML = '';
+                if (!analysis.valid && !isGenerating) {
+                    warningHTML = `
+                        <div class="text-rose-500 group/tooltip relative cursor-help">
+                            ${renderIcon('AlertTriangle', 18)}
+                            <div class="absolute right-0 top-full mt-1 w-64 bg-slate-800 text-white text-xs rounded shadow-lg p-3 opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-20 font-medium">
+                                ${escapeHTML(analysis.warning)}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                let aiButtonsHTML = '';
+                if (obj.text.trim()) {
+                    aiButtonsHTML = `
+                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-white/90 backdrop-blur px-1 py-0.5 rounded shadow-sm border border-slate-100">
+                            <button class="btn-suggest-acts text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Auto-generate Coursework & Assessments perfectly aligned to this objective" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
+                                ${isGeneratingActs ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Activity', 14)}
+                            </button>
+                            <div class="w-px h-4 bg-slate-200"></div>
+                            <button class="btn-rewrite-obj text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Rewrite objective with AI to meet QM Standards" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
+                                ${isGenerating ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)}
+                            </button>
+                        </div>
+                    `;
+                }
+                warningContainer.innerHTML = warningHTML + aiButtonsHTML;
+            }
+        };
+
+        const updateDashboardDOM = (moduleId) => {
+            const module = state.modules.find(m => m.id === moduleId);
+            const container = document.getElementById(`dashboard-${moduleId}`);
+            if (container) container.innerHTML = renderDashboardInner(module);
+            
+            // Re-render activity alignments just in case objective index changed
+            module.activities.forEach(act => {
+                const alignContainer = document.getElementById(`alignments-${act.id}`);
+                if (alignContainer) {
+                    // Extract just the alignment html generation logic
+                    let alignmentPillsHTML = module.objectives.length === 0 
+                        ? '<span class="text-xs text-slate-400 italic">Add objectives first</span>'
+                        : module.objectives.map((obj, idx) => {
+                            const isAligned = act.objectiveIds.includes(obj.id);
+                            const isAligningThis = state.loadingStates.aligningObjective[`${act.id}-${obj.id}`];
+                            const btnClass = isAligned ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600';
+                            return `
+                                <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass} ${isAligningThis ? 'opacity-70 cursor-wait' : ''}" data-mod-id="${module.id}" data-act-id="${act.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}" ${isAligningThis ? 'disabled' : ''}>
+                                    ${isAligningThis ? renderIcon('Loader2', 10, 'animate-spin') : ''} O${idx + 1}
+                                </button>
+                            `;
+                        }).join('');
+                    alignContainer.innerHTML = `<p class="text-xs text-slate-500 mb-1.5 font-medium flex items-center gap-1">QM 2.4 Alignment:</p><div class="flex flex-wrap gap-1.5">${alignmentPillsHTML}</div>`;
+                }
+            });
+        };
+
+        // Attach global listeners
+        document.addEventListener('input', (e) => {
+            if (e.target.matches('.input-module-title')) {
+                const modId = e.target.dataset.modId;
+                const m = state.modules.find(x => x.id === modId);
+                if (m) m.title = e.target.value;
+            } else if (e.target.matches('.input-objective')) {
+                const modId = e.target.dataset.modId;
+                const objId = e.target.dataset.objId;
+                const m = state.modules.find(x => x.id === modId);
+                if (m) {
+                    const obj = m.objectives.find(x => x.id === objId);
+                    if (obj) obj.text = e.target.value;
+                }
+                updateObjectiveDOM(modId, objId);
+                updateDashboardDOM(modId);
+            } else if (e.target.matches('.input-activity-text')) {
+                const modId = e.target.dataset.modId;
+                const actId = e.target.dataset.actId;
+                const m = state.modules.find(x => x.id === modId);
+                if (m) {
+                    const act = m.activities.find(x => x.id === actId);
+                    if (act) act.text = e.target.value;
+                }
+                updateDashboardDOM(modId);
+            } else if (e.target.matches('.input-activity-desc')) {
+                const modId = e.target.dataset.modId;
+                const actId = e.target.dataset.actId;
+                const m = state.modules.find(x => x.id === modId);
+                if (m) {
+                    const act = m.activities.find(x => x.id === actId);
+                    if (act) act.description = e.target.value;
+                }
+            }
+        });
+
+        document.addEventListener('change', (e) => {
+            if (e.target.matches('.input-rsi')) {
+                const modId = e.target.dataset.modId;
+                const actId = e.target.dataset.actId;
+                const m = state.modules.find(x => x.id === modId);
+                if (m) {
+                    const act = m.activities.find(x => x.id === actId);
+                    if (act) act.isRSI = e.target.checked;
+                }
+                updateDashboardDOM(modId);
+            } else if (e.target.id === 'csv-upload') {
+                handleFileUpload(e);
+            }
+        });
+
+        document.addEventListener('click', async (e) => {
+            const t = e.target.closest('button');
+            if (!t) return;
+
+            // Global Actions
+            if (t.id === 'btn-toggle-blooms') { updateState({ showBlooms: !state.showBlooms }); document.getElementById('header-container').innerHTML = renderHeader(); renderSidebar(); }
+            else if (t.id === 'btn-info') { updateState({ showInfoModal: true }); renderModals(); }
+            else if (t.id === 'btn-close-info') { updateState({ showInfoModal: false }); renderModals(); }
+            else if (t.id === 'btn-export') { exportCSV(); }
+            else if (t.id === 'btn-import') { document.getElementById('csv-upload').click(); }
+            else if (t.id === 'btn-add-module') {
+                const newMod = { id: generateId(), title: `Module ${state.modules.length + 1}`, objectives: [{ id: generateId(), text: '' }], activities: [{ id: generateId(), type: 'activity', text: '', description: '', objectiveIds: [], isRSI: false }] };
+                updateState({ modules: [...state.modules, newMod] });
+                renderMainContent();
+            }
+            // Module Actions
+            else if (t.classList.contains('btn-delete-mod')) {
+                updateState({ modules: state.modules.filter(m => m.id !== t.dataset.modId) });
+                renderMainContent();
+            }
+            else if (t.classList.contains('btn-add-obj')) {
+                const m = state.modules.find(x => x.id === t.dataset.modId);
+                if (m) m.objectives.push({ id: generateId(), text: '' });
+                renderMainContent(); // Re-render to show new objective input
+            }
+            else if (t.classList.contains('btn-del-obj')) {
+                const m = state.modules.find(x => x.id === t.dataset.modId);
+                if (m) {
+                    m.objectives = m.objectives.filter(o => o.id !== t.dataset.objId);
+                    m.activities.forEach(a => a.objectiveIds = a.objectiveIds.filter(id => id !== t.dataset.objId));
+                }
+                renderMainContent();
+            }
+            else if (t.classList.contains('btn-add-act')) {
+                const m = state.modules.find(x => x.id === t.dataset.modId);
+                if (m) {
+                    m.activities.push({ id: generateId(), type: t.dataset.type, text: '', description: '', objectiveIds: [], isRSI: false });
+                }
+                renderMainContent();
+            }
+            else if (t.classList.contains('btn-del-act')) {
+                const m = state.modules.find(x => x.id === t.dataset.modId);
+                if (m) m.activities = m.activities.filter(a => a.id !== t.dataset.actId);
+                renderMainContent();
+            }
+            else if (t.classList.contains('btn-toggle-alignment')) {
+                const modId = t.dataset.modId;
+                const actId = t.dataset.actId;
+                const objId = t.dataset.objId;
+                
+                const module = state.modules.find(m => m.id === modId);
+                const activity = module.activities.find(a => a.id === actId);
+                const objective = module.objectives.find(o => o.id === objId);
+                const isAligned = activity.objectiveIds.includes(objId);
+
+                const toggleIt = () => {
+                    if (isAligned) {
+                        activity.objectiveIds = activity.objectiveIds.filter(id => id !== objId);
+                    } else {
+                        activity.objectiveIds.push(objId);
+                    }
+                    updateDashboardDOM(modId);
+                };
+
+                if (isAligned || !activity.text.trim() || !objective.text.trim()) {
+                    toggleIt();
+                } else {
+                    // Manual alignment AI Validation
+                    const loadingKey = `${actId}-${objId}`;
+                    state.loadingStates.aligningObjective[loadingKey] = true;
+                    updateDashboardDOM(modId); // Trigger UI loading state
+                    
+                    try {
+                        const prompt = `You are a strict instructional designer enforcing Quality Matters (QM) Standard 2.4. Objective: "${objective.text}". Coursework/Assessment: Type: ${activity.type} | Title: "${activity.text}" | Details: "${activity.description || 'None'}". Evaluate if this coursework STRICTLY measures this specific objective. CRITICAL RULES: 1. Reading material or viewing a video is NOT a measurement of mastery. If it is just reading/watching, it DOES NOT align. 2. The cognitive level MUST match. A quiz doesn't measure "create" or "defend". Return JSON indicating if it truly "aligns" (boolean) and a short "reason" explaining why it aligns or why it violates QM 2.4.`;
+                        const schema = { type: "OBJECT", properties: { aligns: { type: "BOOLEAN" }, reason: { type: "STRING" } }, required: ["aligns", "reason"] };
+                        const result = await callGeminiAPI(prompt, schema);
+                        if (result) {
+                            if (result.aligns) toggleIt();
+                            else showError(`Alignment Rejected: ${result.reason}`, 8000);
+                        } else toggleIt(); // fallback
+                    } catch (e) {
+                        toggleIt(); // fallback
+                    } finally {
+                        state.loadingStates.aligningObjective[loadingKey] = false;
+                        updateDashboardDOM(modId);
+                    }
+                }
+            }
+            // Bloom's Sidebar
+            else if (t.classList.contains('btn-toggle-bloom-level')) {
+                const lvl = t.dataset.level;
+                state.expandedBlooms[lvl] = !state.expandedBlooms[lvl];
+                renderSidebar();
+            }
+            else if (t.classList.contains('btn-copy-verb')) {
+                const verb = t.dataset.verb;
+                try {
+                    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(verb);
+                    else {
+                        const ta = document.createElement("textarea");
+                        ta.value = verb; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+                    }
+                    updateState({ copiedVerb: verb });
+                    renderSidebar();
+                    setTimeout(() => { updateState({ copiedVerb: null }); renderSidebar(); }, 1500);
+                } catch(e) { console.error("Copy failed", e); }
+            }
+            // AI Functions
+            else if (t.classList.contains('btn-rewrite-obj')) {
+                const modId = t.dataset.modId; const objId = t.dataset.objId;
+                const m = state.modules.find(x => x.id === modId);
+                const obj = m.objectives.find(x => x.id === objId);
+                
+                state.loadingStates.objectives[objId] = true; updateObjectiveDOM(modId, objId);
+                try {
+                    const prompt = `You are an expert instructional designer strictly following Quality Matters (QM) standards. Rewrite the following learning objective to make it specific, measurable, and aligned with Bloom's Taxonomy (QM Standard 2.2). Use a strong action verb. Keep it to a single, concise sentence. Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions.\nCurrent objective: "${obj.text}"`;
+                    const result = await callGeminiAPI(prompt);
+                    if (result) obj.text = result.replace(/["']/g, '').trim();
+                } catch(e) { showError("Failed to rewrite objective."); }
+                finally { state.loadingStates.objectives[objId] = false; updateObjectiveDOM(modId, objId); updateDashboardDOM(modId); }
+            }
+            else if (t.classList.contains('btn-suggest-acts')) {
+                const modId = t.dataset.modId; const objId = t.dataset.objId;
+                const m = state.modules.find(x => x.id === modId);
+                const obj = m.objectives.find(x => x.id === objId);
+                
+                state.loadingStates.objectiveActivities[objId] = true; updateObjectiveDOM(modId, objId);
+                try {
+                    const prompt = `You are an expert instructional designer adhering to Quality Matters (QM) and Regular and Substantive Interaction (RSI) standards. Given this specific learning objective: "${obj.text}". Suggest 2 specific coursework items that would accurately measure this single objective (QM 2.4). 1. One "activity": This must include a description of Regular and Substantive Interaction (RSI), such as a moderated discussion, direct instruction, or substantive faculty feedback. Provide detailed instructions in the "description" field. 2. One "assessment": Match the assessment type to the cognitive level of the objective (e.g., lower-level objectives get quizzes, higher-level objectives get essays/projects). Provide detailed rubric parameters, essay prompts, or sample quiz questions in the "description" field. Return the result as a JSON array.`;
+                    const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { type: { type: "STRING", enum: ["activity", "assessment"] }, text: { type: "STRING" }, description: { type: "STRING" }, isRSI: { type: "BOOLEAN" } }, required: ["type", "text", "description", "isRSI"] } };
+                    const result = await callGeminiAPI(prompt, schema);
+                    if (result && Array.isArray(result)) {
+                        const newActs = result.map(i => ({ id: generateId(), type: i.type, text: i.text, description: i.description || '', isRSI: i.isRSI || false, objectiveIds: [objId] }));
+                        m.activities.push(...newActs);
+                        renderMainContent(); // Need to render to show new elements
+                    }
+                } catch(e) { showError("Failed to suggest activities."); }
+                finally { state.loadingStates.objectiveActivities[objId] = false; updateObjectiveDOM(modId, objId); }
+            }
+            else if (t.classList.contains('btn-suggest-obj')) {
+                const modId = t.dataset.modId;
+                const m = state.modules.find(x => x.id === modId);
+                const actTexts = m.activities.filter(a => a.text.trim()).map(a => `${a.type.toUpperCase()}: ${a.text}${a.description?.trim() ? `\nDetails: ${a.description}` : ''}`);
+                
+                state.loadingStates.moduleObjectives[modId] = true; renderMainContent();
+                try {
+                    const prompt = `You are an expert instructional designer adhering to Quality Matters (QM) standards. Given the following coursework activities and assessments:\n${actTexts.join('\n')}\nSuggest 2 specific, measurable learning objectives that these activities would effectively measure (QM Standard 2.2). Use strong action verbs from Bloom's Taxonomy. Keep them to a single, concise sentence. Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions. Return the result as a JSON array.`;
+                    const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { text: { type: "STRING" } }, required: ["text"] } };
+                    const result = await callGeminiAPI(prompt, schema);
+                    if (result && Array.isArray(result)) {
+                        const newObjs = result.map(i => ({ id: generateId(), text: i.text }));
+                        const newIds = newObjs.map(o => o.id);
+                        m.objectives.push(...newObjs);
+                        m.activities.forEach(a => a.objectiveIds.push(...newIds)); // auto align
+                    }
+                } catch(e) { showError("Failed to suggest objectives."); }
+                finally { state.loadingStates.moduleObjectives[modId] = false; renderMainContent(); }
+            }
+            else if (t.classList.contains('btn-auto-align-mod')) {
+                const modId = t.dataset.modId;
+                const m = state.modules.find(x => x.id === modId);
+                const objs = m.objectives.filter(o => o.text.trim());
+                const acts = m.activities.filter(a => a.text.trim());
+                
+                state.loadingStates.moduleAlignment[modId] = true; renderMainContent();
+                try {
+                    const prompt = `You are an expert instructional designer assessing course alignment (QM Standard 2.4). We have the following Module Learning Objectives:\n${objs.map(o => `[Obj-ID: ${o.id}] ${o.text}`).join('\n')}\nWe have the following Coursework/Assessments:\n${acts.map(a => `[Act-ID: ${a.id}] Type: ${a.type} | Title: "${a.text}" | Details: "${a.description || 'None'}"`).join('\n')}\nEvaluate which of the above objectives are directly measured by each activity. CRITICAL INSTRUCTIONS: 1. Cognitive level MUST match. 2. Reading material or viewing a video is NOT mastery. Activities like "Read Chapter 1" MUST NOT align with any objectives. 3. Be highly critical. Return a JSON array of objects. Each object must represent an activity from the list and contain its "activityId" and an array of the strictly matching "objectiveIds".`;
+                    const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { activityId: { type: "STRING" }, objectiveIds: { type: "ARRAY", items: { type: "STRING" } } }, required: ["activityId", "objectiveIds"] } };
+                    const result = await callGeminiAPI(prompt, schema);
+                    if (result && Array.isArray(result)) {
+                        m.activities.forEach(a => {
+                            const match = result.find(r => r.activityId === a.id);
+                            if (match) a.objectiveIds = (match.objectiveIds || []).filter(id => objs.some(o => o.id === id));
+                        });
+                    }
+                } catch(e) { showError("Failed to auto-align module."); }
+                finally { state.loadingStates.moduleAlignment[modId] = false; renderMainContent(); }
+            }
+        });
+
+        // Initialize App
+        renderAppLayout();
+    </script>
+</body>
+</html>
