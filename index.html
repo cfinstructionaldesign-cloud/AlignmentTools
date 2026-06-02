@@ -186,8 +186,6 @@
                 return null;
             }
             
-            // Note: Changed to 1.5-flash as it is the standard model for public API keys. 
-            // Internal preview models often throw 403/404 errors on standard accounts.
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
             const payload = { contents: [{ parts: [{ text: prompt }] }] };
@@ -318,6 +316,28 @@
         }
 
         // --- 5. DOM Rendering Functions ---
+
+        function renderNotifications() {
+            const container = document.getElementById('notifications-container');
+            if (!container) return;
+            let html = '';
+            if (state.appError) {
+                html += `
+                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-rose-600 text-white max-w-2xl">
+                        ${renderIcon('AlertTriangle', 20, 'shrink-0')}
+                        <span class="text-sm font-medium leading-tight">${escapeHTML(state.appError)}</span>
+                        <button onclick="dismissError()" class="ml-2 hover:bg-rose-500 p-1 rounded-full">${renderIcon('X', 16)}</button>
+                    </div>`;
+            }
+            if (state.appSuccess) {
+                html += `
+                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-green-600 text-white">
+                        ${renderIcon('CheckCircle', 20, 'shrink-0')}
+                        <span class="text-sm font-medium">${escapeHTML(state.appSuccess)}</span>
+                    </div>`;
+            }
+            container.innerHTML = html;
+        }
 
         function renderHeader() { 
             return `
