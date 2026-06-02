@@ -23,6 +23,13 @@
     <div id="app" class="flex-1 flex flex-col h-screen overflow-hidden"></div>
 
     <script>
+        // =====================================================================
+        // 🛑 YOUR API KEY GOES HERE 🛑
+        // Paste your RESTRICTED Google Gemini API key between the quotes below.
+        // =====================================================================
+        const API_KEY = "AIzaSyCaGIymWDwBE4rCQHZn-8UR_Y26Bzs6UEE"; 
+
+
         // --- 1. Data Dictionaries & Constants ---
         
         const unmeasurableVerbs = [
@@ -97,19 +104,20 @@
             MessageSquare: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
         };
 
-        const renderIcon = (name, size = 18, classes = '') => {
+        function renderIcon(name, size = 18, classes = '') {
             return `<div class="inline-block flex-shrink-0 ${classes}" style="width: ${size}px; height: ${size}px;">${icons[name]}</div>`;
-        };
+        }
 
         // --- 3. Utilities & Global State ---
         
-        const generateId = () => Math.random().toString(36).substr(2, 9);
-        const escapeHTML = (str) => {
+        function generateId() { return Math.random().toString(36).substr(2, 9); }
+        
+        function escapeHTML(str) {
             if (!str) return '';
             return str.toString().replace(/[&<>'"]/g, tag => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
             }[tag] || tag));
-        };
+        }
 
         const defaultObjId = generateId();
         const defaultActId = generateId();
@@ -132,26 +140,32 @@
             copiedVerb: null
         };
 
-        const updateState = (updates) => {
+        function updateState(updates) {
             state = { ...state, ...updates };
-        };
+        }
 
         // UI Feedback Helpers
-        const showError = (msg, duration = 4000) => {
+        function showError(msg, duration = 6000) {
             updateState({ appError: msg });
             renderNotifications();
             if (duration) setTimeout(() => { updateState({ appError: null }); renderNotifications(); }, duration);
-        };
+        }
 
-        const showSuccess = (msg, duration = 4000) => {
+        function showSuccess(msg, duration = 4000) {
             updateState({ appSuccess: msg });
             renderNotifications();
             if (duration) setTimeout(() => { updateState({ appSuccess: null }); renderNotifications(); }, duration);
-        };
+        }
+
+        function dismissError() { 
+            updateState({ appError: null }); 
+            renderNotifications(); 
+        }
+        window.dismissError = dismissError; // Expose globally for inline onclick
 
         // --- 4. Logic & AI Integrations ---
 
-        const analyzeObjective = (text) => {
+        function analyzeObjective(text) {
             if (!text) return { valid: true, warning: null };
             const lowerText = text.toLowerCase();
             for (const verb of unmeasurableVerbs) {
@@ -164,12 +178,17 @@
                 }
             }
             return { valid: true, warning: null };
-        };
+        }
 
-        const callGeminiAPI = async (prompt, schema = null) => {
-            const apiKey = "AIzaSyCaGIymWDwBE4rCQHZn-8UR_Y26Bzs6UEE"; // Left intentionally blank per instructions
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-       
+        async function callGeminiAPI(prompt, schema = null) {
+            if (!API_KEY || API_KEY.trim() === "") {
+                showError("API Key is missing. Please add your Google Gemini API key to line 22 of the HTML file.");
+                return null;
+            }
+            
+            // Note: Changed to 1.5-flash as it is the standard model for public API keys. 
+            // Internal preview models often throw 403/404 errors on standard accounts.
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
             const payload = { contents: [{ parts: [{ text: prompt }] }] };
             if (schema) {
@@ -185,20 +204,27 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)
                     });
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    if (!response.ok) {
+                        const errData = await response.json().catch(() => ({}));
+                        throw new Error(errData.error?.message || `HTTP error! status: ${response.status}`);
+                    }
                     const data = await response.json();
                     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
                     return schema ? JSON.parse(text) : text;
                 } catch (error) {
+                    console.error("Gemini API Error:", error);
                     retries--;
-                    if (retries === 0) throw error;
+                    if (retries === 0) {
+                        showError(`AI Generation Failed: ${error.message || 'Check your API key restrictions and network.'}`);
+                        return null;
+                    }
                     await new Promise(resolve => setTimeout(resolve, delay));
                     delay *= 2;
                 }
             }
-        };
+        }
 
-        const exportCSV = () => {
+        function exportCSV() {
             let csvContent = "\uFEFFModule,Type,Content,Details,Aligned Objectives,RSI\n";
             state.modules.forEach((m) => {
                 const modTitle = `"${(m.title || '').replace(/"/g, '""')}"`;
@@ -227,9 +253,9 @@
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-        };
+        }
 
-        const handleFileUpload = (event) => {
+        function handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
 
@@ -284,40 +310,17 @@
                     const isDefault = state.modules.length === 1 && state.modules[0].objectives.length === 1 && state.modules[0].objectives[0].text === '' && state.modules[0].activities.length === 1 && state.modules[0].activities[0].text === '';
                     updateState({ modules: isDefault ? newModules : [...state.modules, ...newModules] });
                     showSuccess("CSV Imported Successfully! You can now use 'Auto-Align All' to map your items.");
-                    renderMainContent(); // Re-render everything
+                    renderMainContent(); 
                 }
-                event.target.value = ''; // Reset input
+                event.target.value = ''; 
             };
             reader.readAsText(file);
-        };
+        }
 
         // --- 5. DOM Rendering Functions ---
 
-        const renderNotifications = () => {
-            const container = document.getElementById('notifications-container');
-            if (!container) return;
-            let html = '';
-            if (state.appError) {
-                html += `
-                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-rose-600 text-white max-w-2xl">
-                        ${renderIcon('AlertTriangle', 20, 'shrink-0')}
-                        <span class="text-sm font-medium leading-tight">${escapeHTML(state.appError)}</span>
-                        <button onclick="dismissError()" class="ml-2 hover:bg-rose-500 p-1 rounded-full">${renderIcon('X', 16)}</button>
-                    </div>`;
-            }
-            if (state.appSuccess) {
-                html += `
-                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-green-600 text-white">
-                        ${renderIcon('CheckCircle', 20, 'shrink-0')}
-                        <span class="text-sm font-medium">${escapeHTML(state.appSuccess)}</span>
-                    </div>`;
-            }
-            container.innerHTML = html;
-        };
-
-        window.dismissError = () => { updateState({ appError: null }); renderNotifications(); };
-
-        const renderHeader = () => `
+        function renderHeader() { 
+            return `
             <header class="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10 shadow-sm">
                 <div>
                     <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -348,15 +351,16 @@
                 </div>
             </header>
         `;
+        }
 
-        const renderInfoModal = () => {
+        function renderInfoModal() {
             if (!state.showInfoModal) return '';
             return `
                 <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden flex flex-col">
                         <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                ${renderIcon('ShieldCheck', 22, 'text-emerald-600')} Privacy, Security & Help
+                                ${renderIcon('ShieldCheck', 22, 'text-emerald-600')} Privacy & Help
                             </h2>
                             <button id="btn-close-info" class="text-slate-400 hover:text-slate-600 p-1 transition-colors">${renderIcon('X', 20)}</button>
                         </div>
@@ -382,9 +386,9 @@
                     </div>
                 </div>
             `;
-        };
+        }
 
-        const renderBloomsSidebar = () => {
+        function renderBloomsSidebar() {
             if (!state.showBlooms) return '';
             let levelsHTML = bloomsTaxonomy.map(data => {
                 const isOpen = state.expandedBlooms[data.level];
@@ -425,9 +429,9 @@
                     </div>
                 </div>
             `;
-        };
+        }
 
-        const renderObjectiveInput = (obj, index, module) => {
+        function renderObjectiveInput(obj, index, module) {
             const analysis = analyzeObjective(obj.text);
             const isGenerating = state.loadingStates.objectives[obj.id];
             const isGeneratingActs = state.loadingStates.objectiveActivities[obj.id];
@@ -474,20 +478,19 @@
                     </div>
                 </div>
             `;
-        };
+        }
 
-        const renderActivityInput = (activity, module) => {
+        function renderActivityInput(activity, module) {
             const isAssessment = activity.type === 'assessment';
             
             let alignmentPillsHTML = module.objectives.length === 0 
                 ? '<span class="text-xs text-slate-400 italic">Add objectives first</span>'
                 : module.objectives.map((obj, idx) => {
                     const isAligned = activity.objectiveIds.includes(obj.id);
-                    const isAligningThis = state.loadingStates.aligningObjective[`${activity.id}-${obj.id}`];
                     const btnClass = isAligned ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600';
                     return `
-                        <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass} ${isAligningThis ? 'opacity-70 cursor-wait' : ''}" data-mod-id="${module.id}" data-act-id="${activity.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}" ${isAligningThis ? 'disabled' : ''}>
-                            ${isAligningThis ? renderIcon('Loader2', 10, 'animate-spin') : ''} O${idx + 1}
+                        <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass}" data-mod-id="${module.id}" data-act-id="${activity.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}">
+                            O${idx + 1}
                         </button>
                     `;
                 }).join('');
@@ -515,9 +518,9 @@
                     </div>
                 </div>
             `;
-        };
+        }
 
-        const renderDashboardInner = (module) => {
+        function renderDashboardInner(module) {
             const orphanObjectives = module.objectives.filter(obj => !module.activities.some(act => act.objectiveIds.includes(obj.id)));
             const unalignedActivities = module.activities.filter(act => act.objectiveIds.length === 0);
             const hasRSI = module.activities.some(act => act.isRSI);
@@ -567,9 +570,9 @@
                     </div>
                 </div>
             `;
-        };
+        }
 
-        const renderModuleCard = (module, index) => {
+        function renderModuleCard(module, index) {
             const isGeneratingObjList = state.loadingStates.moduleObjectives[module.id];
             const isAligningModule = state.loadingStates.moduleAlignment[module.id];
             const hasActivitiesText = module.activities.filter(a => a.text.trim()).length > 0;
@@ -617,9 +620,9 @@
                     <div id="dashboard-${module.id}">${renderDashboardInner(module)}</div>
                 </div>
             `;
-        };
+        }
 
-        const renderMainContent = () => {
+        function renderMainContent() {
             const container = document.getElementById('main-content');
             if (!container) return;
             let html = '<div class="flex-1 overflow-y-auto p-6 space-y-8" id="modules-container">';
@@ -630,22 +633,22 @@
                 </button>
             </div>`;
             container.innerHTML = html;
-        };
+        }
 
-        const renderSidebar = () => {
+        function renderSidebar() {
             const container = document.getElementById('sidebar-container');
             if (!container) return;
             container.innerHTML = renderBloomsSidebar();
-        };
+        }
 
-        const renderModals = () => {
+        function renderModals() {
             const container = document.getElementById('modals-container');
             if (!container) return;
             container.innerHTML = renderInfoModal();
-        };
+        }
 
         // Complete layout skeleton
-        const renderAppLayout = () => {
+        function renderAppLayout() {
             document.getElementById('app').innerHTML = `
                 <div id="notifications-container"></div>
                 <div id="header-container">${renderHeader()}</div>
@@ -659,12 +662,12 @@
             renderMainContent();
             renderSidebar();
             renderModals();
-        };
+        }
 
         // --- 6. Event Handlers & Delegation ---
 
         // Targeted DOM updaters to prevent focus loss
-        const updateObjectiveDOM = (moduleId, objId) => {
+        function updateObjectiveDOM(moduleId, objId) {
             const module = state.modules.find(m => m.id === moduleId);
             const objIndex = module.objectives.findIndex(o => o.id === objId);
             const obj = module.objectives[objIndex];
@@ -710,9 +713,9 @@
                 }
                 warningContainer.innerHTML = warningHTML + aiButtonsHTML;
             }
-        };
+        }
 
-        const updateDashboardDOM = (moduleId) => {
+        function updateDashboardDOM(moduleId) {
             const module = state.modules.find(m => m.id === moduleId);
             const container = document.getElementById(`dashboard-${moduleId}`);
             if (container) container.innerHTML = renderDashboardInner(module);
@@ -726,18 +729,17 @@
                         ? '<span class="text-xs text-slate-400 italic">Add objectives first</span>'
                         : module.objectives.map((obj, idx) => {
                             const isAligned = act.objectiveIds.includes(obj.id);
-                            const isAligningThis = state.loadingStates.aligningObjective[`${act.id}-${obj.id}`];
                             const btnClass = isAligned ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600';
                             return `
-                                <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass} ${isAligningThis ? 'opacity-70 cursor-wait' : ''}" data-mod-id="${module.id}" data-act-id="${act.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}" ${isAligningThis ? 'disabled' : ''}>
-                                    ${isAligningThis ? renderIcon('Loader2', 10, 'animate-spin') : ''} O${idx + 1}
+                                <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass}" data-mod-id="${module.id}" data-act-id="${act.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}">
+                                    O${idx + 1}
                                 </button>
                             `;
                         }).join('');
                     alignContainer.innerHTML = `<p class="text-xs text-slate-500 mb-1.5 font-medium flex items-center gap-1">QM 2.4 Alignment:</p><div class="flex flex-wrap gap-1.5">${alignmentPillsHTML}</div>`;
                 }
             });
-        };
+        }
 
         // Attach global listeners
         document.addEventListener('input', (e) => {
@@ -836,47 +838,21 @@
                 renderMainContent();
             }
             else if (t.classList.contains('btn-toggle-alignment')) {
+                // INSTANT MANUAL ALIGNMENT (No AI Validation)
                 const modId = t.dataset.modId;
                 const actId = t.dataset.actId;
                 const objId = t.dataset.objId;
                 
                 const module = state.modules.find(m => m.id === modId);
                 const activity = module.activities.find(a => a.id === actId);
-                const objective = module.objectives.find(o => o.id === objId);
                 const isAligned = activity.objectiveIds.includes(objId);
 
-                const toggleIt = () => {
-                    if (isAligned) {
-                        activity.objectiveIds = activity.objectiveIds.filter(id => id !== objId);
-                    } else {
-                        activity.objectiveIds.push(objId);
-                    }
-                    updateDashboardDOM(modId);
-                };
-
-                if (isAligned || !activity.text.trim() || !objective.text.trim()) {
-                    toggleIt();
+                if (isAligned) {
+                    activity.objectiveIds = activity.objectiveIds.filter(id => id !== objId);
                 } else {
-                    // Manual alignment AI Validation
-                    const loadingKey = `${actId}-${objId}`;
-                    state.loadingStates.aligningObjective[loadingKey] = true;
-                    updateDashboardDOM(modId); // Trigger UI loading state
-                    
-                    try {
-                        const prompt = `You are a strict instructional designer enforcing Quality Matters (QM) Standard 2.4. Objective: "${objective.text}". Coursework/Assessment: Type: ${activity.type} | Title: "${activity.text}" | Details: "${activity.description || 'None'}". Evaluate if this coursework STRICTLY measures this specific objective. CRITICAL RULES: 1. Reading material or viewing a video is NOT a measurement of mastery. If it is just reading/watching, it DOES NOT align. 2. The cognitive level MUST match. A quiz doesn't measure "create" or "defend". Return JSON indicating if it truly "aligns" (boolean) and a short "reason" explaining why it aligns or why it violates QM 2.4.`;
-                        const schema = { type: "OBJECT", properties: { aligns: { type: "BOOLEAN" }, reason: { type: "STRING" } }, required: ["aligns", "reason"] };
-                        const result = await callGeminiAPI(prompt, schema);
-                        if (result) {
-                            if (result.aligns) toggleIt();
-                            else showError(`Alignment Rejected: ${result.reason}`, 8000);
-                        } else toggleIt(); // fallback
-                    } catch (e) {
-                        toggleIt(); // fallback
-                    } finally {
-                        state.loadingStates.aligningObjective[loadingKey] = false;
-                        updateDashboardDOM(modId);
-                    }
+                    activity.objectiveIds.push(objId);
                 }
+                updateDashboardDOM(modId);
             }
             // Bloom's Sidebar
             else if (t.classList.contains('btn-toggle-bloom-level')) {
@@ -908,7 +884,7 @@
                     const prompt = `You are an expert instructional designer strictly following Quality Matters (QM) standards. Rewrite the following learning objective to make it specific, measurable, and aligned with Bloom's Taxonomy (QM Standard 2.2). Use a strong action verb. Keep it to a single, concise sentence. Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions.\nCurrent objective: "${obj.text}"`;
                     const result = await callGeminiAPI(prompt);
                     if (result) obj.text = result.replace(/["']/g, '').trim();
-                } catch(e) { showError("Failed to rewrite objective."); }
+                } catch(e) { /* Error handled in callGeminiAPI */ }
                 finally { state.loadingStates.objectives[objId] = false; updateObjectiveDOM(modId, objId); updateDashboardDOM(modId); }
             }
             else if (t.classList.contains('btn-suggest-acts')) {
@@ -926,7 +902,7 @@
                         m.activities.push(...newActs);
                         renderMainContent(); // Need to render to show new elements
                     }
-                } catch(e) { showError("Failed to suggest activities."); }
+                } catch(e) { /* Error handled in callGeminiAPI */ }
                 finally { state.loadingStates.objectiveActivities[objId] = false; updateObjectiveDOM(modId, objId); }
             }
             else if (t.classList.contains('btn-suggest-obj')) {
@@ -945,7 +921,7 @@
                         m.objectives.push(...newObjs);
                         m.activities.forEach(a => a.objectiveIds.push(...newIds)); // auto align
                     }
-                } catch(e) { showError("Failed to suggest objectives."); }
+                } catch(e) { /* Error handled in callGeminiAPI */ }
                 finally { state.loadingStates.moduleObjectives[modId] = false; renderMainContent(); }
             }
             else if (t.classList.contains('btn-auto-align-mod')) {
@@ -965,7 +941,7 @@
                             if (match) a.objectiveIds = (match.objectiveIds || []).filter(id => objs.some(o => o.id === id));
                         });
                     }
-                } catch(e) { showError("Failed to auto-align module."); }
+                } catch(e) { /* Error handled in callGeminiAPI */ }
                 finally { state.loadingStates.moduleAlignment[modId] = false; renderMainContent(); }
             }
         });
