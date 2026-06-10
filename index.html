@@ -33,7 +33,7 @@
     let moduleCounter = 1;
 
     // --- AI Integration Logic ---
-    async function callGemini(prompt) {
+async function callGemini(prompt) {
         if (GEMINI_API_KEY === "YOUR_API_KEY_HERE") {
             alert("Error: Admin has not configured the API Key yet.");
             return null;
@@ -49,13 +49,21 @@
                 })
             });
             const data = await response.json();
+            
+            // NEW: If Google sends back an explicit error, show it to the user!
+            if (data.error) {
+                console.error("Google API Error:", data.error);
+                alert("Google API Error: " + data.error.message + "\n\n(If it says 'API key not valid', check your key. If it says 'requests from this referer are blocked', you are testing locally or your GitHub URL restriction is slightly off.)");
+                return null;
+            }
+
             // Clean markdown formatting if Gemini includes it
             let rawText = data.candidates[0].content.parts[0].text;
             let cleanText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
             return JSON.parse(cleanText);
         } catch (error) {
-            console.error(error);
-            alert("AI Generation failed. Please try again.");
+            console.error("System Error:", error);
+            alert("System Error: Something went wrong reading the data. Press F12 to check the developer console for details.");
             return null;
         }
     }
