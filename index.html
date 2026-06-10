@@ -3,972 +3,299 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instructional Alignment Builder</title>
+    <title>Instructional Alignment & Bloom's Builder</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        /* Custom scrollbar for a cleaner look in the sidebars/modals */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        .cursor-wait { cursor: wait !important; }
-        
-        /* Spin animation for loading icons */
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        .animate-spin { animation: spin 1s linear infinite; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background-color: white; }
+            .print-border { border: 1px solid #e5e7eb; page-break-inside: avoid; }
+            .print-text-black { color: black !important; }
+            .shadow-lg { box-shadow: none !important; }
+        }
+        .loader {
+            border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6;
+            border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
-    <div id="app" class="flex-1 flex flex-col h-screen overflow-hidden"></div>
+<body class="bg-slate-50 text-slate-800 font-sans p-4 md:p-8">
 
-    <script>
-        // =====================================================================
-        // 🛑 YOUR API KEY GOES HERE 🛑
-        // Paste your RESTRICTED Google Gemini API key between the quotes below.
-        // =====================================================================
-        const API_KEY = "AIzaSyCaGIymWDwBE4rCQHZn-8UR_Y26Bzs6UEE"; 
+<script>
+    // ==========================================
+    // ADMIN SETUP: PASTE YOUR GEMINI API KEY BELOW
+    // ==========================================
+    const GEMINI_API_KEY = "AIzaSyCaGIymWDwBE4rCQHZn-8UR_Y26Bzs6UEE"; 
+    
+    // Auto-generate unique IDs
+    let moduleCounter = 1;
 
-
-        // --- 1. Data Dictionaries & Constants ---
-        
-        const unmeasurableVerbs = [
-            'understand the context of', 'understand', 'remember', 'know', 'learn', 
-            'appreciate', 'comprehend', 'familiarize', 'become familiar with', 
-            'be aware of', 'be exposed to', 'believe', 'conceptualize', 'discover', 
-            'experience', 'explore', 'gain knowledge of', 'grasp the significance of', 
-            'have a good grasp of', 'grasp', 'listen', 'memorize', 'notice', 
-            'perceive', 'realize', 'think', 'study', 'cover', 'read'
-        ];
-
-        const bloomsTaxonomy = [
-            {
-                level: 'Remembering',
-                description: 'The student can recognize the information and principles that were presented.',
-                color: 'bg-rose-100 text-rose-800 border-rose-200',
-                verbs: ['Arrange', 'Complete', 'Define', 'Describe', 'Duplicate', 'Identify', 'Label', 'List', 'Locate', 'Match', 'Name', 'Order', 'Outline', 'Place', 'Quote', 'Recite', 'Recognize', 'Relate', 'Recall', 'Repeat', 'Reproduce', 'Select', 'State']
-            },
-            {
-                level: 'Understanding',
-                description: 'The student translates or interprets information based on prior learning.',
-                color: 'bg-orange-100 text-orange-800 border-orange-200',
-                verbs: ['Classify', 'Convert', 'Contrast', 'Defend', 'Describe', 'Discuss', 'Distinguish', 'Explain', 'Estimate', 'Express', 'Extend', 'Generalize', 'Identify', 'Illustrate', 'Indicate', 'Interpret', 'Paraphrase', 'Predict', 'Recognize', 'Restate', 'Rewrite', 'Select', 'Summarize', 'Translate']
-            },
-            {
-                level: 'Applying',
-                description: 'The student selects, transfers, and uses data and principles to complete a problem or task.',
-                color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-                verbs: ['Apply', 'Change', 'Choose', 'Compute', 'Demonstrate', 'Discover', 'Dramatize', 'Employ', 'Illustrate', 'Interpret', 'Manipulate', 'Modify', 'Operate', 'Practice', 'Predict', 'Prepare', 'Produce', 'Relate', 'Schedule', 'Show', 'Sketch', 'Solve', 'Use', 'Write']
-            },
-            {
-                level: 'Analyzing',
-                description: 'The student distinguishes, classifies, and relates the assumptions, hypotheses, or structure of a statement.',
-                color: 'bg-green-100 text-green-800 border-green-200',
-                verbs: ['Analyze', 'Appraise', 'Breakdown', 'Calculate', 'Categorize', 'Compare', 'Contrast', 'Criticize', 'Deduce', 'Diagram', 'Differentiate', 'Discriminate', 'Distinguish', 'Examine', 'Experiment', 'Identify', 'Illustrate', 'Infer', 'Model', 'Outline', 'Point out', 'Question', 'Relate', 'Select', 'Separate', 'Subdivide', 'Test']
-            },
-            {
-                level: 'Evaluating',
-                description: 'The student appraises, assesses, or critiques on a basis of specific standards and criteria.',
-                color: 'bg-blue-100 text-blue-800 border-blue-200',
-                verbs: ['Appraise', 'Argue', 'Assess', 'Attach', 'Choose', 'Compare', 'Conclude', 'Contrast', 'Defend', 'Describe', 'Discriminate', 'Estimate', 'Evaluate', 'Explain', 'Judge', 'Justify', 'Interpret', 'Relate', 'Predict', 'Rate', 'Select', 'Summarize', 'Support', 'Value']
-            },
-            {
-                level: 'Creating / Synthesizing',
-                description: 'The student originates, integrates, and combines ideas into a product, plan or proposal.',
-                color: 'bg-purple-100 text-purple-800 border-purple-200',
-                verbs: ['Arrange', 'Assemble', 'Build', 'Categorize', 'Collect', 'Combine', 'Compose', 'Construct', 'Create', 'Derive', 'Design', 'Develop', 'Devise', 'Explain', 'Formulate', 'Generate', 'Group', 'Integrate', 'Invent', 'Manage', 'Modify', 'Order', 'Organize', 'Plan', 'Prescribe', 'Propose', 'Rearrange', 'Reconstruct', 'Reorganize', 'Setup', 'Specify', 'Substitute', 'Transform']
-            }
-        ];
-
-        // --- 2. Icon Dictionary (Standard SVGs replacing React components) ---
-        const icons = {
-            Target: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
-            BookOpen: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
-            Upload: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-            Download: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
-            ShieldCheck: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 11l3 3 5-5"/></svg>',
-            AlertTriangle: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-            CheckCircle: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
-            X: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-            Mail: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
-            Plus: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
-            Trash2: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
-            Sparkles: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>',
-            Activity: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
-            Info: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
-            Loader2: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
-            Lightbulb: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/></svg>',
-            ChevronDown: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
-            ChevronRight: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
-            Copy: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
-            MessageSquare: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
-        };
-
-        function renderIcon(name, size = 18, classes = '') {
-            return `<div class="inline-block flex-shrink-0 ${classes}" style="width: ${size}px; height: ${size}px;">${icons[name]}</div>`;
+    // --- AI Integration Logic ---
+    async function callGemini(prompt) {
+        if (GEMINI_API_KEY === "YOUR_API_KEY_HERE") {
+            alert("Error: Admin has not configured the API Key yet.");
+            return null;
         }
-
-        // --- 3. Utilities & Global State ---
-        
-        function generateId() { return Math.random().toString(36).substr(2, 9); }
-        
-        function escapeHTML(str) {
-            if (!str) return '';
-            return str.toString().replace(/[&<>'"]/g, tag => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-            }[tag] || tag));
-        }
-
-        const defaultObjId = generateId();
-        const defaultActId = generateId();
-
-        let state = {
-            modules: [
-                {
-                    id: generateId(),
-                    title: 'Module 1',
-                    objectives: [{ id: defaultObjId, text: '' }],
-                    activities: [{ id: defaultActId, type: 'activity', text: '', description: '', objectiveIds: [], isRSI: false }]
-                }
-            ],
-            showBlooms: true,
-            showInfoModal: false,
-            loadingStates: { objectives: {}, objectiveActivities: {}, moduleObjectives: {}, moduleAlignment: {}, aligningObjective: {} },
-            appError: null,
-            appSuccess: null,
-            expandedBlooms: {}, 
-            copiedVerb: null
-        };
-
-        function updateState(updates) {
-            state = { ...state, ...updates };
-        }
-
-        // UI Feedback Helpers
-        function showError(msg, duration = 6000) {
-            updateState({ appError: msg });
-            renderNotifications();
-            if (duration) setTimeout(() => { updateState({ appError: null }); renderNotifications(); }, duration);
-        }
-
-        function showSuccess(msg, duration = 4000) {
-            updateState({ appSuccess: msg });
-            renderNotifications();
-            if (duration) setTimeout(() => { updateState({ appSuccess: null }); renderNotifications(); }, duration);
-        }
-
-        function dismissError() { 
-            updateState({ appError: null }); 
-            renderNotifications(); 
-        }
-        window.dismissError = dismissError; 
-
-        // --- 4. Logic & AI Integrations ---
-
-        function analyzeObjective(text) {
-            if (!text) return { valid: true, warning: null };
-            const lowerText = text.toLowerCase();
-            for (const verb of unmeasurableVerbs) {
-                const regex = new RegExp(`\\b${verb}\\b`, 'i');
-                if (regex.test(lowerText)) {
-                    if (['understand', 'remember', 'understand the context of'].includes(verb)) {
-                        return { valid: false, warning: `"${verb.charAt(0).toUpperCase() + verb.slice(1)}" is a level of learning, not an acceptable measurable verb. Try an action verb from Bloom's Taxonomy.` };
-                    }
-                    return { valid: false, warning: `The phrasing "${verb}" is difficult to measure. Try using a specific action verb from Bloom's Taxonomy.` };
-                }
-            }
-            return { valid: true, warning: null };
-        }
-
-        async function callGeminiAPI(prompt, schema = null) {
-            if (!API_KEY || API_KEY.trim() === "") {
-                showError("API Key is missing. Please add your Google Gemini API key to line 22 of the HTML file.");
-                return null;
-            }
-            
-            // Using the reliable, stable model 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`; 
-
-            const payload = { contents: [{ parts: [{ text: prompt }] }] };
-            if (schema) {
-                payload.generationConfig = { responseMimeType: "application/json", responseSchema: schema };
-            }
-
-            let retries = 5;
-            let delay = 1000;
-            while (retries > 0) {
-                try {
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (!response.ok) {
-                        const errData = await response.json().catch(() => ({}));
-                        throw new Error(errData.error?.message || `HTTP error! status: ${response.status}`);
-                    }
-                    const data = await response.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    return schema ? JSON.parse(text) : text;
-                } catch (error) {
-                    console.error("Gemini API Error:", error);
-                    retries--;
-                    if (retries === 0) {
-                        showError(`AI Generation Failed: ${error.message || 'Check your API key restrictions and network.'}`);
-                        return null;
-                    }
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    delay *= 2;
-                }
-            }
-        }
-
-        function exportCSV() {
-            let csvContent = "\uFEFFModule,Type,Content,Details,Aligned Objectives,RSI\n";
-            state.modules.forEach((m) => {
-                const modTitle = `"${(m.title || '').replace(/"/g, '""')}"`;
-                m.objectives.forEach((o) => {
-                    const text = `"${(o.text || '').replace(/"/g, '""')}"`;
-                    csvContent += `${modTitle},Objective,${text},,, \n`;
-                });
-                m.activities.forEach((a) => {
-                    const text = `"${(a.text || '').replace(/"/g, '""')}"`;
-                    const details = `"${(a.description || '').replace(/"/g, '""')}"`;
-                    const aligned = `"${a.objectiveIds.map(id => {
-                        const idx = m.objectives.findIndex(o => o.id === id);
-                        return idx !== -1 ? `O${idx + 1}` : '';
-                    }).filter(Boolean).join(', ')}"`;
-                    const rsi = a.isRSI ? 'Yes' : 'No';
-                    const type = a.type === 'assessment' ? 'Assessment' : 'Activity';
-                    csvContent += `${modTitle},${type},${text},${details},${aligned},${rsi}\n`;
-                });
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { response_mime_type: "application/json" }
+                })
             });
-
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.setAttribute("href", url);
-            link.setAttribute("download", "course_alignment.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            const data = await response.json();
+            // Clean markdown formatting if Gemini includes it
+            let rawText = data.candidates[0].content.parts[0].text;
+            let cleanText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+            return JSON.parse(cleanText);
+        } catch (error) {
+            console.error(error);
+            alert("AI Generation failed. Please try again.");
+            return null;
         }
+    }
 
-        function handleFileUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
+    function getModuleData(modId) {
+        const modEl = document.getElementById(`module-${modId}`);
+        const objInputs = modEl.querySelectorAll('.objective-input');
+        const actInputs = modEl.querySelectorAll('.activity-input');
+        return {
+            objectives: Array.from(objInputs).map(i => i.value).filter(v => v.trim() !== ''),
+            activities: Array.from(actInputs).map(i => i.value).filter(v => v.trim() !== '')
+        };
+    }
 
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const text = e.target.result;
-                const rows = text.split(/\r?\n/).filter(row => row.trim());
-                let importedModulesMap = new Map();
-
-                const parseCSVRow = (str) => {
-                    let result = [];
-                    let inQuotes = false;
-                    let current = '';
-                    for (let i = 0; i < str.length; i++) {
-                        let char = str[i];
-                        if (char === '"') { inQuotes = !inQuotes; } 
-                        else if (char === ',' && !inQuotes) { result.push(current); current = ''; } 
-                        else { current += char; }
-                    }
-                    result.push(current);
-                    return result.map(s => s.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-                };
-
-                const startIndex = rows[0].toLowerCase().includes('module') ? 1 : 0;
-
-                for (let i = startIndex; i < rows.length; i++) {
-                    const cols = parseCSVRow(rows[i]);
-                    if (cols.length < 3) continue;
-
-                    const modTitle = cols[0] || 'Imported Module';
-                    const type = (cols[1] || '').toLowerCase();
-                    const content = cols[2] || '';
-                    const details = cols[3] || '';
-                    const rsi = (cols[5] || '').toLowerCase() === 'yes';
-
-                    if (!importedModulesMap.has(modTitle)) {
-                        importedModulesMap.set(modTitle, { id: generateId(), title: modTitle, objectives: [], activities: [] });
-                    }
-                    
-                    const mod = importedModulesMap.get(modTitle);
-                    if (type === 'objective') {
-                        mod.objectives.push({ id: generateId(), text: content });
-                    } else if (type === 'activity' || type === 'assessment') {
-                        mod.activities.push({
-                            id: generateId(), type: type, text: content, description: details, objectiveIds: [], isRSI: rsi
-                        });
-                    }
-                }
-
-                const newModules = Array.from(importedModulesMap.values());
-                if (newModules.length > 0) {
-                    const isDefault = state.modules.length === 1 && state.modules[0].objectives.length === 1 && state.modules[0].objectives[0].text === '' && state.modules[0].activities.length === 1 && state.modules[0].activities[0].text === '';
-                    updateState({ modules: isDefault ? newModules : [...state.modules, ...newModules] });
-                    showSuccess("CSV Imported Successfully! You can now use 'Auto-Align All' to map your items.");
-                    renderMainContent(); 
-                }
-                event.target.value = ''; 
-            };
-            reader.readAsText(file);
+    async function suggestObjectives(modId) {
+        const data = getModuleData(modId);
+        if (data.activities.length === 0) return alert("Please add at least one activity first.");
+        
+        toggleLoader(modId, 'obj-btn', true);
+        const prompt = `You are an expert instructional designer. Based on these course activities: ${JSON.stringify(data.activities)}. Generate 3 measurable module learning objectives using Bloom's Taxonomy verbs. Return ONLY JSON format: { "suggestedObjectives": ["objective 1", "objective 2", "objective 3"] }`;
+        
+        const result = await callGemini(prompt);
+        if (result && result.suggestedObjectives) {
+            result.suggestedObjectives.forEach(obj => addListItem(modId, 'objectives', obj));
         }
+        toggleLoader(modId, 'obj-btn', false);
+    }
 
-        // --- 5. DOM Rendering Functions ---
-
-        function renderNotifications() {
-            const container = document.getElementById('notifications-container');
-            if (!container) return;
-            let html = '';
-            if (state.appError) {
-                html += `
-                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-rose-600 text-white max-w-2xl">
-                        ${renderIcon('AlertTriangle', 20, 'shrink-0')}
-                        <span class="text-sm font-medium leading-tight">${escapeHTML(state.appError)}</span>
-                        <button onclick="dismissError()" class="ml-2 hover:bg-rose-500 p-1 rounded-full">${renderIcon('X', 16)}</button>
-                    </div>`;
-            }
-            if (state.appSuccess) {
-                html += `
-                    <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-xl flex items-center gap-3 transition-all bg-green-600 text-white">
-                        ${renderIcon('CheckCircle', 20, 'shrink-0')}
-                        <span class="text-sm font-medium">${escapeHTML(state.appSuccess)}</span>
-                    </div>`;
-            }
-            container.innerHTML = html;
+    async function suggestActivities(modId) {
+        const data = getModuleData(modId);
+        if (data.objectives.length === 0) return alert("Please add at least one objective first.");
+        
+        toggleLoader(modId, 'act-btn', true);
+        const prompt = `You are an expert instructional designer. Based on these module objectives: ${JSON.stringify(data.objectives)}. Generate 3 engaging course activities or assessments that would measure these objectives. Return ONLY JSON format: { "suggestedActivities": ["activity 1", "activity 2", "activity 3"] }`;
+        
+        const result = await callGemini(prompt);
+        if (result && result.suggestedActivities) {
+            result.suggestedActivities.forEach(act => addListItem(modId, 'activities', act));
         }
+        toggleLoader(modId, 'act-btn', false);
+    }
 
-        function renderHeader() { 
-            return `
-            <header class="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10 shadow-sm">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                        ${renderIcon('Target', 24, 'text-blue-600')}
-                        Instructional Alignment Builder
-                    </h1>
-                    <p class="text-sm text-slate-500 mt-1">Design measurable objectives, map coursework, and verify QM/RSI compliance.</p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <input type="file" accept=".csv" id="csv-upload" class="hidden" />
-                    <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200 shadow-sm">
-                        <button id="btn-import" title="Import from CSV" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-slate-600 hover:bg-white hover:text-slate-800 transition-colors">
-                            ${renderIcon('Upload', 16)} <span class="text-sm hidden lg:inline">Import CSV</span>
-                        </button>
-                        <button id="btn-export" title="Export to CSV" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-slate-600 hover:bg-white hover:text-slate-800 transition-colors">
-                            ${renderIcon('Download', 16)} <span class="text-sm hidden lg:inline">Export CSV</span>
-                        </button>
-                    </div>
-                    <div class="h-6 w-px bg-slate-300 mx-1 hidden md:block"></div>
-                    <button id="btn-info" class="flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 transition-colors shadow-sm">
-                        ${renderIcon('ShieldCheck', 18, 'text-emerald-600')}
-                        <span class="hidden sm:inline">Privacy & Help</span>
-                    </button>
-                    <button id="btn-toggle-blooms" class="flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-colors shadow-sm ${state.showBlooms ? 'bg-blue-100 text-blue-700' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}">
-                        ${renderIcon('BookOpen', 18)}
-                        <span class="hidden sm:inline">${state.showBlooms ? 'Hide Guide' : 'Show Guide'}</span>
-                    </button>
-                </div>
-            </header>
-        `;
+    async function checkAlignment(modId) {
+        const data = getModuleData(modId);
+        if (data.objectives.length === 0 && data.activities.length === 0) return;
+        
+        toggleLoader(modId, 'align-btn', true);
+        const prompt = `You are an expert instructional designer reviewer. Review this module.
+        Objectives: ${JSON.stringify(data.objectives)}
+        Activities: ${JSON.stringify(data.activities)}
+        Tasks:
+        1. Flag any unmeasurable verbs in the objectives (e.g., understand, know, learn, appreciate) and suggest Bloom's Taxonomy alternatives.
+        2. Map each activity to the objective(s) it supports. 
+        3. Identify any activities with no supporting objective, or objectives with no assessment.
+        Return ONLY valid JSON matching this schema:
+        {
+          "verbIssues": [ { "objective": "text", "issue": "explanation", "suggestedFix": "better text" } ],
+          "alignment": [ { "activity": "text", "alignedTo": ["objective text"], "isAligned": true/false } ],
+          "orphanedObjectives": ["objective text"]
+        }`;
+
+        const result = await callGemini(prompt);
+        if (result) renderAlignmentDashboard(modId, result);
+        toggleLoader(modId, 'align-btn', false);
+    }
+
+    // --- UI Logic ---
+    function toggleLoader(modId, btnType, show) {
+        const btn = document.getElementById(`${btnType}-${modId}`);
+        if (show) {
+            btn.dataset.originalText = btn.innerHTML;
+            btn.innerHTML = `<div class="loader inline-block mr-2"></div> Processing...`;
+            btn.disabled = true;
+        } else {
+            btn.innerHTML = btn.dataset.originalText;
+            btn.disabled = false;
         }
+    }
 
-        function renderInfoModal() {
-            if (!state.showInfoModal) return '';
-            return `
-                <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden flex flex-col">
-                        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                ${renderIcon('ShieldCheck', 22, 'text-emerald-600')} Privacy & Help
-                            </h2>
-                            <button id="btn-close-info" class="text-slate-400 hover:text-slate-600 p-1 transition-colors">${renderIcon('X', 20)}</button>
-                        </div>
-                        <div class="p-6 space-y-5 overflow-y-auto max-h-[70vh]">
-                            <div>
-                                <h3 class="font-semibold text-slate-800 mb-1">Is my data saved?</h3>
-                                <p class="text-sm text-slate-600 leading-relaxed">No. This tool runs entirely in your local browser. <strong>Nothing you type is saved to a database.</strong> If you refresh or close the page, your data will be cleared unless you export it.</p>
-                            </div>
-                            <div>
-                                <h3 class="font-semibold text-slate-800 mb-1">How does import/export work?</h3>
-                                <p class="text-sm text-slate-600 leading-relaxed">Use the <strong>Export CSV</strong> button to download your work to your computer. You can open this file in Excel or Sheets to view or edit. Use <strong>Import CSV</strong> to load a saved file back into this tool so you can continue working where you left off.</p>
-                            </div>
-                            <div>
-                                <h3 class="font-semibold text-slate-800 mb-1">What happens to data sent to the AI?</h3>
-                                <p class="text-sm text-slate-600 leading-relaxed">When you click the "✨ Suggest" or "✨ Auto-Align All" buttons, the text you've provided is securely sent to the AI to generate a response. It is not used to train public AI models. However, to prevent any potential academic integrity issues, <strong>we recommend pasting rubrics, prompts, or topics instead of verbatim exam questions.</strong></p>
-                            </div>
-                            <div class="bg-blue-50 border border-blue-100 rounded-lg p-5 mt-2">
-                                <h3 class="font-semibold text-blue-900 mb-1 flex items-center gap-2">${renderIcon('Mail', 18)} Have questions?</h3>
-                                <p class="text-sm text-blue-800 mb-4">Need help aligning your course, fulfilling RSI requirements, or understanding QM standards?</p>
-                                <a href="mailto:instructionaldesign@cf.edu" class="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 transition-colors">Contact Instructional Design</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderBloomsSidebar() {
-            if (!state.showBlooms) return '';
-            let levelsHTML = bloomsTaxonomy.map(data => {
-                const isOpen = state.expandedBlooms[data.level];
-                let verbsHTML = data.verbs.map(verb => {
-                    const isCopied = state.copiedVerb === verb;
-                    return `
-                        <button class="btn-copy-verb relative text-[11px] px-2 py-1 bg-white border border-slate-200 rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-slate-600 transition-colors flex items-center gap-1 group/btn" data-verb="${escapeHTML(verb)}">
-                            ${escapeHTML(verb)}
-                            ${isCopied ? renderIcon('CheckCircle', 10, 'text-green-500') : renderIcon('Copy', 10, 'text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity')}
-                        </button>
-                    `;
-                }).join('');
-
-                return `
-                    <div class="border rounded-lg overflow-hidden transition-all duration-200 ${isOpen ? 'shadow-md border-slate-300' : 'border-slate-200'}">
-                        <button class="btn-toggle-bloom-level w-full flex items-center justify-between p-3 text-left ${data.color} hover:brightness-95 transition-all" data-level="${data.level}">
-                            <div><h4 class="font-bold text-sm">${data.level}</h4></div>
-                            ${isOpen ? renderIcon('ChevronDown', 18) : renderIcon('ChevronRight', 18)}
-                        </button>
-                        ${isOpen ? `
-                            <div class="bg-white border-t border-slate-100 flex flex-col">
-                                <p class="text-xs text-slate-600 p-3 pb-2 italic border-b border-slate-100 bg-slate-50/50">${data.description}</p>
-                                <div class="p-3 flex flex-wrap gap-1.5">${verbsHTML}</div>
-                            </div>
-                        ` : ''}
-                    </div>
-                `;
-            }).join('');
-
-            return `
-                <div class="w-80 border-l border-slate-200 bg-white overflow-y-auto flex-shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)]">
-                    <div class="p-5">
-                        <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">${renderIcon('Lightbulb', 20, 'text-amber-500')} Bloom's Taxonomy</h2>
-                        <p class="text-xs text-slate-600 mb-6 bg-slate-100 p-3 rounded-lg border border-slate-200">
-                            <strong>QM Standard 2.2:</strong> Module objectives must be measurable. Click a verb below to copy it. Avoid levels of learning like <em>"understand"</em> or <em>"remember"</em>.
-                        </p>
-                        <div class="space-y-4">${levelsHTML}</div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderObjectiveInput(obj, index, module) {
-            const analysis = analyzeObjective(obj.text);
-            const isGenerating = state.loadingStates.objectives[obj.id];
-            const isGeneratingActs = state.loadingStates.objectiveActivities[obj.id];
+    function addModule() {
+        const id = moduleCounter++;
+        const html = `
+        <div id="module-${id}" class="print-border bg-white p-6 rounded-xl shadow-lg border border-slate-200 mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <input type="text" class="text-2xl font-bold text-slate-800 border-b-2 border-transparent hover:border-slate-300 focus:border-blue-500 outline-none w-3/4 print-text-black" value="Module ${id}: [Topic]">
+                <button onclick="this.closest('#module-${id}').remove()" class="no-print text-red-500 hover:text-red-700" title="Remove Module"><i class="fas fa-trash"></i></button>
+            </div>
             
-            let warningHTML = '';
-            if (!analysis.valid && !isGenerating) {
-                warningHTML = `
-                    <div class="text-rose-500 group/tooltip relative cursor-help">
-                        ${renderIcon('AlertTriangle', 18)}
-                        <div class="absolute right-0 top-full mt-1 w-64 bg-slate-800 text-white text-xs rounded shadow-lg p-3 opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-20 font-medium">
-                            ${escapeHTML(analysis.warning)}
-                        </div>
-                    </div>
-                `;
-            }
-
-            let aiButtonsHTML = '';
-            if (obj.text.trim()) {
-                aiButtonsHTML = `
-                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-white/90 backdrop-blur px-1 py-0.5 rounded shadow-sm border border-slate-100">
-                        <button class="btn-suggest-acts text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Auto-generate Coursework & Assessments perfectly aligned to this objective" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
-                            ${isGeneratingActs ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Activity', 14)}
-                        </button>
-                        <div class="w-px h-4 bg-slate-200"></div>
-                        <button class="btn-rewrite-obj text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Rewrite objective with AI to meet QM Standards" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
-                            ${isGenerating ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)}
-                        </button>
-                    </div>
-                `;
-            }
-
-            return `
-                <div class="relative group">
-                    <div class="flex items-start gap-2">
-                        <span class="mt-2.5 text-xs font-bold text-slate-400 w-6 shrink-0">O${index + 1}</span>
-                        <div class="flex-1 relative">
-                            <textarea class="input-objective w-full text-sm rounded-lg border ${analysis.valid ? 'border-slate-300 focus:border-blue-500' : 'border-rose-400 focus:border-rose-500 bg-rose-50'} focus:ring-2 focus:ring-opacity-20 focus:outline-none px-3 py-2 min-h-[60px] resize-none transition-colors ${isGenerating ? 'opacity-50' : ''}" placeholder="e.g., Identify the basic concepts..." data-mod-id="${module.id}" data-obj-id="${obj.id}" ${isGenerating ? 'disabled' : ''}>${escapeHTML(obj.text)}</textarea>
-                            <div class="objective-warning-container absolute right-2 top-2 flex items-center gap-2" id="warning-${obj.id}">
-                                ${warningHTML}
-                                ${aiButtonsHTML}
-                            </div>
-                        </div>
-                        <button class="btn-del-obj mt-2 text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity" data-mod-id="${module.id}" data-obj-id="${obj.id}">${renderIcon('Trash2', 16)}</button>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="bg-blue-50/50 p-4 rounded-lg">
+                    <h3 class="font-bold text-blue-800 mb-3"><i class="fas fa-bullseye mr-2"></i>Module Objectives</h3>
+                    <div id="objectives-list-${id}" class="space-y-2 mb-4"></div>
+                    <div class="no-print space-y-2">
+                        <button onclick="addListItem(${id}, 'objectives')" class="w-full text-sm text-blue-600 border border-blue-200 hover:bg-blue-100 py-2 rounded"><i class="fas fa-plus mr-1"></i> Add Blank Objective</button>
+                        <button id="obj-btn-${id}" onclick="suggestObjectives(${id})" class="w-full text-sm bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors"><i class="fas fa-wand-magic-sparkles mr-1"></i> AI: Suggest based on Activities</button>
                     </div>
                 </div>
-            `;
-        }
 
-        function renderActivityInput(activity, module) {
-            const isAssessment = activity.type === 'assessment';
-            
-            let alignmentPillsHTML = module.objectives.length === 0 
-                ? '<span class="text-xs text-slate-400 italic">Add objectives first</span>'
-                : module.objectives.map((obj, idx) => {
-                    const isAligned = activity.objectiveIds.includes(obj.id);
-                    const btnClass = isAligned ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600';
-                    return `
-                        <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass}" data-mod-id="${module.id}" data-act-id="${activity.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}">
-                            O${idx + 1}
-                        </button>
-                    `;
-                }).join('');
-
-            return `
-                <div class="p-3 rounded-lg border ${isAssessment ? 'border-purple-200 bg-purple-50/40' : 'border-green-200 bg-green-50/40'} group">
-                    <div class="flex items-start gap-2 mb-3">
-                        <span class="mt-2 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${isAssessment ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}">${isAssessment ? 'Eval' : 'Act'}</span>
-                        <div class="flex-1">
-                            <input type="text" class="input-activity-text w-full bg-white text-sm rounded border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none px-2 py-1.5" placeholder="${isAssessment ? 'e.g., Midterm Exam' : 'e.g., Read Chapter 1 & Post to Discussion'}" value="${escapeHTML(activity.text)}" data-mod-id="${module.id}" data-act-id="${activity.id}" />
-                            <textarea class="input-activity-desc w-full mt-2 bg-white/60 text-xs rounded border border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 focus:outline-none px-2 py-1.5 min-h-[60px] resize-y" placeholder="${isAssessment ? 'Optional: Paste assessment questions or rubric details here for better AI alignment...' : 'Optional: Elaborate on the discussion prompt, instructions, or context...'}" data-mod-id="${module.id}" data-act-id="${activity.id}">${escapeHTML(activity.description)}</textarea>
-                            ${!isAssessment ? `
-                                <label class="flex items-center gap-2 mt-2 cursor-pointer w-max group/rsi">
-                                    <input type="checkbox" class="input-rsi rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" ${activity.isRSI ? 'checked' : ''} data-mod-id="${module.id}" data-act-id="${activity.id}" />
-                                    <span class="text-xs text-slate-600 font-medium group-hover/rsi:text-blue-700 transition-colors">Includes Substantive Interaction (RSI)</span>
-                                    ${renderIcon('Info', 12, 'text-slate-400')}
-                                </label>
-                            ` : ''}
-                        </div>
-                        <button class="btn-del-act mt-1.5 text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity" data-mod-id="${module.id}" data-act-id="${activity.id}">${renderIcon('Trash2', 16)}</button>
-                    </div>
-                    <div class="ml-10 pt-2 border-t border-slate-200/50" id="alignments-${activity.id}">
-                        <p class="text-xs text-slate-500 mb-1.5 font-medium flex items-center gap-1">QM 2.4 Alignment:</p>
-                        <div class="flex flex-wrap gap-1.5">${alignmentPillsHTML}</div>
+                <div class="bg-emerald-50/50 p-4 rounded-lg">
+                    <h3 class="font-bold text-emerald-800 mb-3"><i class="fas fa-tasks mr-2"></i>Activities / Assessments</h3>
+                    <div id="activities-list-${id}" class="space-y-2 mb-4"></div>
+                    <div class="no-print space-y-2">
+                        <button onclick="addListItem(${id}, 'activities')" class="w-full text-sm text-emerald-600 border border-emerald-200 hover:bg-emerald-100 py-2 rounded"><i class="fas fa-plus mr-1"></i> Add Blank Activity</button>
+                        <button id="act-btn-${id}" onclick="suggestActivities(${id})" class="w-full text-sm bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded transition-colors"><i class="fas fa-wand-magic-sparkles mr-1"></i> AI: Suggest based on Objectives</button>
                     </div>
                 </div>
-            `;
-        }
+            </div>
 
-        function renderDashboardInner(module) {
-            const orphanObjectives = module.objectives.filter(obj => !module.activities.some(act => act.objectiveIds.includes(obj.id)));
-            const unalignedActivities = module.activities.filter(act => act.objectiveIds.length === 0);
-            const hasRSI = module.activities.some(act => act.isRSI);
-            const unmeasurableCount = module.objectives.filter(obj => !analyzeObjective(obj.text).valid).length;
+            <div class="mt-6 border-t pt-4">
+                <button id="align-btn-${id}" onclick="checkAlignment(${id})" class="no-print w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow"><i class="fas fa-microscope mr-2"></i> Check Alignment & Verbs</button>
+                <div id="results-${id}" class="mt-4 hidden"></div>
+            </div>
+        </div>`;
+        
+        document.getElementById('modules-container').insertAdjacentHTML('beforeend', html);
+        // Add defaults
+        addListItem(id, 'objectives', 'The student will be able to...');
+        addListItem(id, 'activities', 'Quiz, Discussion, or Essay...');
+    }
 
-            if (module.objectives.length === 0 && module.activities.length === 0) return '';
+    function addListItem(modId, listType, value = '') {
+        const list = document.getElementById(`${listType}-list-${modId}`);
+        const inputClass = listType === 'objectives' ? 'objective-input' : 'activity-input';
+        const color = listType === 'objectives' ? 'blue' : 'emerald';
+        const id = Date.now() + Math.random();
+        
+        const itemHtml = `
+        <div id="item-${id}" class="flex items-start bg-white p-2 border border-${color}-100 rounded shadow-sm">
+            <span class="text-${color}-400 mr-2 mt-1"><i class="fas fa-chevron-right text-xs"></i></span>
+            <textarea class="${inputClass} w-full resize-none outline-none text-sm text-slate-700" rows="2" placeholder="Type here...">${value}</textarea>
+            <button onclick="this.closest('#item-${id}').remove()" class="no-print ml-2 text-slate-400 hover:text-red-500"><i class="fas fa-times"></i></button>
+        </div>`;
+        list.insertAdjacentHTML('beforeend', itemHtml);
+    }
 
-            return `
-                <div class="bg-slate-100/50 border-t border-slate-200 p-5">
-                    <h4 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">${renderIcon('Activity', 16)} Course Health & Compliance Dashboard</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        
-                        <div class="p-3 rounded-lg border text-sm flex items-start gap-3 ${unmeasurableCount === 0 ? 'bg-white border-green-200' : 'bg-white border-rose-200'}">
-                            ${unmeasurableCount === 0 ? renderIcon('CheckCircle', 18, 'text-green-500 mt-0.5 shrink-0') : renderIcon('AlertTriangle', 18, 'text-rose-500 mt-0.5 shrink-0')}
-                            <div>
-                                <p class="font-semibold ${unmeasurableCount === 0 ? 'text-green-800' : 'text-rose-800'}">QM Standards 2.1 & 2.2</p>
-                                <p class="${unmeasurableCount === 0 ? 'text-slate-600' : 'text-rose-600'} text-xs mt-1">
-                                    ${unmeasurableCount === 0 ? 'All objectives appear measurable.' : `You have ${unmeasurableCount} objective(s) containing unmeasurable verbs.`}
-                                </p>
-                            </div>
-                        </div>
+    function renderAlignmentDashboard(modId, result) {
+        const container = document.getElementById(`results-${modId}`);
+        container.classList.remove('hidden');
+        
+        let html = `<div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            <h4 class="font-bold text-slate-700 mb-4 border-b pb-2"><i class="fas fa-chart-pie mr-2"></i> AI Alignment Health Report</h4>`;
 
-                        <div class="p-3 rounded-lg border text-sm flex items-start gap-3 ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? 'bg-white border-green-200' : 'bg-white border-amber-300 shadow-sm'}">
-                            ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? renderIcon('CheckCircle', 18, 'text-green-500 mt-0.5 shrink-0') : renderIcon('AlertTriangle', 18, 'text-amber-500 mt-0.5 shrink-0')}
-                            <div>
-                                <p class="font-semibold ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) ? 'text-green-800' : 'text-amber-900'}">QM Standard 2.4 Alignment</p>
-                                ${(orphanObjectives.length === 0 && unalignedActivities.length === 0) 
-                                    ? '<p class="text-slate-600 text-xs mt-1">Clear relationship between all objectives and coursework.</p>'
-                                    : `<div class="text-amber-800 text-xs mt-1">
-                                        ${orphanObjectives.length > 0 ? `<p class="font-medium mt-1">Missing Assessments for:</p><ul class="list-disc pl-4 space-y-0.5">${orphanObjectives.map(obj => `<li class="truncate max-w-[150px]" title="${escapeHTML(obj.text)}">O${module.objectives.findIndex(o => o.id === obj.id) + 1}</li>`).join('')}</ul>` : ''}
-                                        ${unalignedActivities.length > 0 ? `<p class="font-medium mt-1">Unaligned Coursework:</p><ul class="list-disc pl-4 space-y-0.5">${unalignedActivities.map(act => `<li class="truncate max-w-[150px]" title="${escapeHTML(act.text)}">${escapeHTML(act.text) || '(Empty)'}</li>`).join('')}</ul>` : ''}
-                                       </div>`
-                                }
-                            </div>
-                        </div>
-
-                        <div class="p-3 rounded-lg border text-sm flex items-start gap-3 ${hasRSI ? 'bg-white border-green-200' : 'bg-white border-blue-300 shadow-sm'}">
-                            ${hasRSI ? renderIcon('CheckCircle', 18, 'text-green-500 mt-0.5 shrink-0') : renderIcon('MessageSquare', 18, 'text-blue-500 mt-0.5 shrink-0')}
-                            <div>
-                                <p class="font-semibold ${hasRSI ? 'text-green-800' : 'text-blue-900'}">RSI Requirement</p>
-                                <p class="${hasRSI ? 'text-slate-600' : 'text-blue-800'} text-xs mt-1">
-                                    ${hasRSI ? 'Module includes Regular and Substantive Interaction.' : 'Flag at least one activity to track substantive instructor engagement (e.g., feedback, discussion).'}
-                                </p>
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderModuleCard(module, index) {
-            const isGeneratingObjList = state.loadingStates.moduleObjectives[module.id];
-            const isAligningModule = state.loadingStates.moduleAlignment[module.id];
-            const hasActivitiesText = module.activities.filter(a => a.text.trim()).length > 0;
-
-            return `
-                <div class="module-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden" id="module-${module.id}">
-                    <div class="bg-slate-50 border-b border-slate-200 p-4 flex items-center justify-between group">
-                        <div class="flex-1 flex items-center gap-3">
-                            <span class="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-lg text-sm">M${index + 1}</span>
-                            <input type="text" class="input-module-title flex-1 bg-transparent font-semibold text-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1" placeholder="Module Title" value="${escapeHTML(module.title)}" data-mod-id="${module.id}" />
-                        </div>
-                        <button class="btn-delete-mod text-slate-400 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity" data-mod-id="${module.id}">${renderIcon('Trash2', 18)}</button>
-                    </div>
-                    <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div>
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="font-semibold text-slate-800 flex items-center gap-2">${renderIcon('Target', 18, 'text-blue-500')} Learning Objectives</h3>
-                                <div class="flex gap-2">
-                                    <button class="btn-suggest-obj text-xs font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" title="${!hasActivitiesText ? 'Add coursework first to get AI suggestions' : 'Auto-generate QM aligned objectives based on your coursework'}" ${isGeneratingObjList || !hasActivitiesText ? 'disabled' : ''}>
-                                        ${isGeneratingObjList ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)} ✨ Suggest
-                                    </button>
-                                    <button class="btn-add-obj text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded transition-colors" data-mod-id="${module.id}">${renderIcon('Plus', 14)} Add Objective</button>
-                                </div>
-                            </div>
-                            <div class="space-y-3" id="objectives-list-${module.id}">
-                                ${module.objectives.length === 0 ? '<p class="text-sm text-slate-500 italic text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">No objectives added yet.</p>' : module.objectives.map((obj, i) => renderObjectiveInput(obj, i, module)).join('')}
-                            </div>
-                        </div>
-                        <div>
-                            <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-                                <h3 class="font-semibold text-slate-800 flex items-center gap-2">${renderIcon('Activity', 18, 'text-green-500')} Coursework</h3>
-                                <div class="flex gap-2">
-                                    <button class="btn-auto-align-mod text-xs font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-colors shadow-sm border border-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" title="Auto-evaluate and match ALL activities to the correct objectives in this module" ${isAligningModule || module.activities.length === 0 || module.objectives.length === 0 ? 'disabled' : ''}>
-                                        ${isAligningModule ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)} ✨ Auto-Align All
-                                    </button>
-                                    <button class="btn-add-act text-xs font-medium text-green-600 hover:text-green-800 flex items-center gap-1 bg-green-50 px-2 py-1 rounded" data-mod-id="${module.id}" data-type="activity">${renderIcon('Plus', 14)} Act</button>
-                                    <button class="btn-add-act text-xs font-medium text-purple-600 hover:text-purple-800 flex items-center gap-1 bg-purple-50 px-2 py-1 rounded" data-mod-id="${module.id}" data-type="assessment">${renderIcon('Plus', 14)} Eval</button>
-                                </div>
-                            </div>
-                            <div class="space-y-4" id="activities-list-${module.id}">
-                                ${module.activities.length === 0 ? '<p class="text-sm text-slate-500 italic text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">No coursework added yet. Hover over an objective and click the activity icon to auto-generate activities!</p>' : module.activities.map(act => renderActivityInput(act, module)).join('')}
-                            </div>
-                        </div>
-                    </div>
-                    <div id="dashboard-${module.id}">${renderDashboardInner(module)}</div>
-                </div>
-            `;
-        }
-
-        function renderMainContent() {
-            const container = document.getElementById('main-content');
-            if (!container) return;
-            let html = '<div class="flex-1 overflow-y-auto p-6 space-y-8" id="modules-container">';
-            html += state.modules.map((m, i) => renderModuleCard(m, i)).join('');
-            html += `
-                <button id="btn-add-module" class="w-full py-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-medium hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-colors flex items-center justify-center gap-2">
-                    ${renderIcon('Plus', 20)} Add New Module
-                </button>
-            </div>`;
-            container.innerHTML = html;
-        }
-
-        function renderSidebar() {
-            const container = document.getElementById('sidebar-container');
-            if (!container) return;
-            container.innerHTML = renderBloomsSidebar();
-        }
-
-        function renderModals() {
-            const container = document.getElementById('modals-container');
-            if (!container) return;
-            container.innerHTML = renderInfoModal();
-        }
-
-        // Complete layout skeleton
-        function renderAppLayout() {
-            document.getElementById('app').innerHTML = `
-                <div id="notifications-container"></div>
-                <div id="header-container">${renderHeader()}</div>
-                <div class="flex-1 flex overflow-hidden relative">
-                    <div id="main-content" class="flex-1 flex flex-col h-full overflow-hidden"></div>
-                    <div id="sidebar-container" class="h-full flex-shrink-0"></div>
-                </div>
-                <div id="modals-container"></div>
-            `;
-            renderNotifications();
-            renderMainContent();
-            renderSidebar();
-            renderModals();
-        }
-
-        // --- 6. Event Handlers & Delegation ---
-
-        // Targeted DOM updaters to prevent focus loss
-        function updateObjectiveDOM(moduleId, objId) {
-            const module = state.modules.find(m => m.id === moduleId);
-            const objIndex = module.objectives.findIndex(o => o.id === objId);
-            const obj = module.objectives[objIndex];
-            
-            const analysis = analyzeObjective(obj.text);
-            const isGenerating = state.loadingStates.objectives[obj.id];
-            const isGeneratingActs = state.loadingStates.objectiveActivities[obj.id];
-
-            // Re-eval input classes
-            const input = document.querySelector(`textarea.input-objective[data-obj-id="${objId}"]`);
-            if (input) {
-                input.className = `input-objective w-full text-sm rounded-lg border ${analysis.valid ? 'border-slate-300 focus:border-blue-500' : 'border-rose-400 focus:border-rose-500 bg-rose-50'} focus:ring-2 focus:ring-opacity-20 focus:outline-none px-3 py-2 min-h-[60px] resize-none transition-colors ${isGenerating ? 'opacity-50' : ''}`;
-            }
-
-            // Update warning container inner HTML
-            const warningContainer = document.getElementById(`warning-${objId}`);
-            if (warningContainer) {
-                let warningHTML = '';
-                if (!analysis.valid && !isGenerating) {
-                    warningHTML = `
-                        <div class="text-rose-500 group/tooltip relative cursor-help">
-                            ${renderIcon('AlertTriangle', 18)}
-                            <div class="absolute right-0 top-full mt-1 w-64 bg-slate-800 text-white text-xs rounded shadow-lg p-3 opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-20 font-medium">
-                                ${escapeHTML(analysis.warning)}
-                            </div>
-                        </div>
-                    `;
-                }
-
-                let aiButtonsHTML = '';
-                if (obj.text.trim()) {
-                    aiButtonsHTML = `
-                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-white/90 backdrop-blur px-1 py-0.5 rounded shadow-sm border border-slate-100">
-                            <button class="btn-suggest-acts text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Auto-generate Coursework & Assessments perfectly aligned to this objective" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
-                                ${isGeneratingActs ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Activity', 14)}
-                            </button>
-                            <div class="w-px h-4 bg-slate-200"></div>
-                            <button class="btn-rewrite-obj text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed" data-mod-id="${module.id}" data-obj-id="${obj.id}" title="Rewrite objective with AI to meet QM Standards" ${isGenerating || isGeneratingActs ? 'disabled' : ''}>
-                                ${isGenerating ? renderIcon('Loader2', 14, 'animate-spin') : renderIcon('Sparkles', 14)}
-                            </button>
-                        </div>
-                    `;
-                }
-                warningContainer.innerHTML = warningHTML + aiButtonsHTML;
-            }
-        }
-
-        function updateDashboardDOM(moduleId) {
-            const module = state.modules.find(m => m.id === moduleId);
-            const container = document.getElementById(`dashboard-${moduleId}`);
-            if (container) container.innerHTML = renderDashboardInner(module);
-            
-            // Re-render activity alignments just in case objective index changed
-            module.activities.forEach(act => {
-                const alignContainer = document.getElementById(`alignments-${act.id}`);
-                if (alignContainer) {
-                    // Extract just the alignment html generation logic
-                    let alignmentPillsHTML = module.objectives.length === 0 
-                        ? '<span class="text-xs text-slate-400 italic">Add objectives first</span>'
-                        : module.objectives.map((obj, idx) => {
-                            const isAligned = act.objectiveIds.includes(obj.id);
-                            const btnClass = isAligned ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600';
-                            return `
-                                <button class="btn-toggle-alignment text-xs font-medium px-2.5 py-1 rounded-md border transition-all flex items-center justify-center gap-1 ${btnClass}" data-mod-id="${module.id}" data-act-id="${act.id}" data-obj-id="${obj.id}" title="${escapeHTML(obj.text || 'Empty objective')}">
-                                    O${idx + 1}
-                                </button>
-                            `;
-                        }).join('');
-                    alignContainer.innerHTML = `<p class="text-xs text-slate-500 mb-1.5 font-medium flex items-center gap-1">QM 2.4 Alignment:</p><div class="flex flex-wrap gap-1.5">${alignmentPillsHTML}</div>`;
-                }
+        // 1. Verb Issues
+        if (result.verbIssues && result.verbIssues.length > 0) {
+            html += `<div class="mb-4">
+                <h5 class="text-sm font-bold text-red-600 mb-2"><i class="fas fa-triangle-exclamation mr-1"></i> Unmeasurable Verbs Found</h5>
+                <ul class="space-y-2">`;
+            result.verbIssues.forEach(issue => {
+                html += `<li class="text-sm bg-red-50 p-2 rounded border border-red-100">
+                    <span class="line-through text-slate-500">"${issue.objective}"</span><br>
+                    <strong>Issue:</strong> ${issue.issue} <br>
+                    <strong class="text-emerald-600">Try:</strong> ${issue.suggestedFix}
+                </li>`;
             });
+            html += `</ul></div>`;
+        } else {
+            html += `<p class="text-sm text-emerald-600 font-bold mb-4"><i class="fas fa-check-circle mr-1"></i> All objectives use measurable verbs!</p>`;
         }
 
-        // Attach global listeners
-        document.addEventListener('input', (e) => {
-            if (e.target.matches('.input-module-title')) {
-                const modId = e.target.dataset.modId;
-                const m = state.modules.find(x => x.id === modId);
-                if (m) m.title = e.target.value;
-            } else if (e.target.matches('.input-objective')) {
-                const modId = e.target.dataset.modId;
-                const objId = e.target.dataset.objId;
-                const m = state.modules.find(x => x.id === modId);
-                if (m) {
-                    const obj = m.objectives.find(x => x.id === objId);
-                    if (obj) obj.text = e.target.value;
-                }
-                updateObjectiveDOM(modId, objId);
-                updateDashboardDOM(modId);
-            } else if (e.target.matches('.input-activity-text')) {
-                const modId = e.target.dataset.modId;
-                const actId = e.target.dataset.actId;
-                const m = state.modules.find(x => x.id === modId);
-                if (m) {
-                    const act = m.activities.find(x => x.id === actId);
-                    if (act) act.text = e.target.value;
-                }
-                updateDashboardDOM(modId);
-            } else if (e.target.matches('.input-activity-desc')) {
-                const modId = e.target.dataset.modId;
-                const actId = e.target.dataset.actId;
-                const m = state.modules.find(x => x.id === modId);
-                if (m) {
-                    const act = m.activities.find(x => x.id === actId);
-                    if (act) act.description = e.target.value;
-                }
-            }
-        });
+        // 2. Alignment Map
+        if (result.alignment && result.alignment.length > 0) {
+            html += `<div class="mb-4">
+                <h5 class="text-sm font-bold text-indigo-800 mb-2"><i class="fas fa-link mr-1"></i> Activity Alignment Map</h5>
+                <ul class="space-y-2">`;
+            result.alignment.forEach(map => {
+                const icon = map.isAligned ? '<i class="fas fa-check text-emerald-500"></i>' : '<i class="fas fa-xmark text-red-500"></i>';
+                const alignedList = map.isAligned ? map.alignedTo.join(', ') : '<span class="text-red-500">No matching objective found.</span>';
+                html += `<li class="text-sm bg-white p-2 rounded border shadow-sm">
+                    <strong>Activity:</strong> ${map.activity} ${icon}<br>
+                    <span class="text-slate-500">Supports:</span> ${alignedList}
+                </li>`;
+            });
+            html += `</ul></div>`;
+        }
 
-        document.addEventListener('change', (e) => {
-            if (e.target.matches('.input-rsi')) {
-                const modId = e.target.dataset.modId;
-                const actId = e.target.dataset.actId;
-                const m = state.modules.find(x => x.id === modId);
-                if (m) {
-                    const act = m.activities.find(x => x.id === actId);
-                    if (act) act.isRSI = e.target.checked;
-                }
-                updateDashboardDOM(modId);
-            } else if (e.target.id === 'csv-upload') {
-                handleFileUpload(e);
-            }
-        });
+        // 3. Orphaned Objectives
+        if (result.orphanedObjectives && result.orphanedObjectives.length > 0) {
+            html += `<div>
+                <h5 class="text-sm font-bold text-amber-600 mb-2"><i class="fas fa-circle-exclamation mr-1"></i> Objectives missing Activities</h5>
+                <ul class="list-disc pl-5 text-sm text-slate-700">`;
+            result.orphanedObjectives.forEach(obj => { html += `<li>${obj}</li>`; });
+            html += `</ul></div>`;
+        }
 
-        document.addEventListener('click', async (e) => {
-            const t = e.target.closest('button');
-            if (!t) return;
+        html += `</div>`;
+        container.innerHTML = html;
+    }
 
-            // Global Actions
-            if (t.id === 'btn-toggle-blooms') { updateState({ showBlooms: !state.showBlooms }); document.getElementById('header-container').innerHTML = renderHeader(); renderSidebar(); }
-            else if (t.id === 'btn-info') { updateState({ showInfoModal: true }); renderModals(); }
-            else if (t.id === 'btn-close-info') { updateState({ showInfoModal: false }); renderModals(); }
-            else if (t.id === 'btn-export') { exportCSV(); }
-            else if (t.id === 'btn-import') { document.getElementById('csv-upload').click(); }
-            else if (t.id === 'btn-add-module') {
-                const newMod = { id: generateId(), title: `Module ${state.modules.length + 1}`, objectives: [{ id: generateId(), text: '' }], activities: [{ id: generateId(), type: 'activity', text: '', description: '', objectiveIds: [], isRSI: false }] };
-                updateState({ modules: [...state.modules, newMod] });
-                renderMainContent();
-            }
-            // Module Actions
-            else if (t.classList.contains('btn-delete-mod')) {
-                updateState({ modules: state.modules.filter(m => m.id !== t.dataset.modId) });
-                renderMainContent();
-            }
-            else if (t.classList.contains('btn-add-obj')) {
-                const m = state.modules.find(x => x.id === t.dataset.modId);
-                if (m) m.objectives.push({ id: generateId(), text: '' });
-                renderMainContent(); // Re-render to show new objective input
-            }
-            else if (t.classList.contains('btn-del-obj')) {
-                const m = state.modules.find(x => x.id === t.dataset.modId);
-                if (m) {
-                    m.objectives = m.objectives.filter(o => o.id !== t.dataset.objId);
-                    m.activities.forEach(a => a.objectiveIds = a.objectiveIds.filter(id => id !== t.dataset.objId));
-                }
-                renderMainContent();
-            }
-            else if (t.classList.contains('btn-add-act')) {
-                const m = state.modules.find(x => x.id === t.dataset.modId);
-                if (m) {
-                    m.activities.push({ id: generateId(), type: t.dataset.type, text: '', description: '', objectiveIds: [], isRSI: false });
-                }
-                renderMainContent();
-            }
-            else if (t.classList.contains('btn-del-act')) {
-                const m = state.modules.find(x => x.id === t.dataset.modId);
-                if (m) m.activities = m.activities.filter(a => a.id !== t.dataset.actId);
-                renderMainContent();
-            }
-            else if (t.classList.contains('btn-toggle-alignment')) {
-                // INSTANT MANUAL ALIGNMENT (No AI Validation)
-                const modId = t.dataset.modId;
-                const actId = t.dataset.actId;
-                const objId = t.dataset.objId;
-                
-                const module = state.modules.find(m => m.id === modId);
-                const activity = module.activities.find(a => a.id === actId);
-                const isAligned = activity.objectiveIds.includes(objId);
+    // Toggle Guide
+    function toggleGuide() {
+        const guide = document.getElementById('alignment-guide');
+        guide.classList.toggle('hidden');
+    }
 
-                if (isAligned) {
-                    activity.objectiveIds = activity.objectiveIds.filter(id => id !== objId);
-                } else {
-                    activity.objectiveIds.push(objId);
-                }
-                updateDashboardDOM(modId);
-            }
-            // Bloom's Sidebar
-            else if (t.classList.contains('btn-toggle-bloom-level')) {
-                const lvl = t.dataset.level;
-                state.expandedBlooms[lvl] = !state.expandedBlooms[lvl];
-                renderSidebar();
-            }
-            else if (t.classList.contains('btn-copy-verb')) {
-                const verb = t.dataset.verb;
-                try {
-                    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(verb);
-                    else {
-                        const ta = document.createElement("textarea");
-                        ta.value = verb; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-                    }
-                    updateState({ copiedVerb: verb });
-                    renderSidebar();
-                    setTimeout(() => { updateState({ copiedVerb: null }); renderSidebar(); }, 1500);
-                } catch(e) { console.error("Copy failed", e); }
-            }
-            // AI Functions
-            else if (t.classList.contains('btn-rewrite-obj')) {
-                const modId = t.dataset.modId; const objId = t.dataset.objId;
-                const m = state.modules.find(x => x.id === modId);
-                const obj = m.objectives.find(x => x.id === objId);
-                
-                state.loadingStates.objectives[objId] = true; updateObjectiveDOM(modId, objId);
-                try {
-                    const prompt = `You are an expert instructional designer strictly following Quality Matters (QM) standards. Rewrite the following learning objective to make it specific, measurable, and aligned with Bloom's Taxonomy (QM Standard 2.2). Use a strong action verb. Keep it to a single, concise sentence. Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions.\nCurrent objective: "${obj.text}"`;
-                    const result = await callGeminiAPI(prompt);
-                    if (result) obj.text = result.replace(/["']/g, '').trim();
-                } catch(e) { /* Error handled in callGeminiAPI */ }
-                finally { state.loadingStates.objectives[objId] = false; updateObjectiveDOM(modId, objId); updateDashboardDOM(modId); }
-            }
-            else if (t.classList.contains('btn-suggest-acts')) {
-                const modId = t.dataset.modId; const objId = t.dataset.objId;
-                const m = state.modules.find(x => x.id === modId);
-                const obj = m.objectives.find(x => x.id === objId);
-                
-                state.loadingStates.objectiveActivities[objId] = true; updateObjectiveDOM(modId, objId);
-                try {
-                    const prompt = `You are an expert instructional designer adhering to Quality Matters (QM) and Regular and Substantive Interaction (RSI) standards. Given this specific learning objective: "${obj.text}". Suggest 2 specific coursework items that would accurately measure this single objective (QM 2.4). 1. One "activity": This must include a description of Regular and Substantive Interaction (RSI), such as a moderated discussion, direct instruction, or substantive faculty feedback. Provide detailed instructions in the "description" field. 2. One "assessment": Match the assessment type to the cognitive level of the objective (e.g., lower-level objectives get quizzes, higher-level objectives get essays/projects). Provide detailed rubric parameters, essay prompts, or sample quiz questions in the "description" field. Return the result as a JSON array.`;
-                    const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { type: { type: "STRING", enum: ["activity", "assessment"] }, text: { type: "STRING" }, description: { type: "STRING" }, isRSI: { type: "BOOLEAN" } }, required: ["type", "text", "description", "isRSI"] } };
-                    const result = await callGeminiAPI(prompt, schema);
-                    if (result && Array.isArray(result)) {
-                        const newActs = result.map(i => ({ id: generateId(), type: i.type, text: i.text, description: i.description || '', isRSI: i.isRSI || false, objectiveIds: [objId] }));
-                        m.activities.push(...newActs);
-                        renderMainContent(); // Need to render to show new elements
-                    }
-                } catch(e) { /* Error handled in callGeminiAPI */ }
-                finally { state.loadingStates.objectiveActivities[objId] = false; updateObjectiveDOM(modId, objId); }
-            }
-            else if (t.classList.contains('btn-suggest-obj')) {
-                const modId = t.dataset.modId;
-                const m = state.modules.find(x => x.id === modId);
-                const actTexts = m.activities.filter(a => a.text.trim()).map(a => `${a.type.toUpperCase()}: ${a.text}${a.description?.trim() ? `\nDetails: ${a.description}` : ''}`);
-                
-                state.loadingStates.moduleObjectives[modId] = true; renderMainContent();
-                try {
-                    const prompt = `You are an expert instructional designer adhering to Quality Matters (QM) standards. Given the following coursework activities and assessments:\n${actTexts.join('\n')}\nSuggest 2 specific, measurable learning objectives that these activities would effectively measure (QM Standard 2.2). Use strong action verbs from Bloom's Taxonomy. Keep them to a single, concise sentence. Do not include introductory phrases like "Students will be able to". NEVER use words like "understand", "remember", or "learn" as these are levels of learning, not measurable actions. Return the result as a JSON array.`;
-                    const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { text: { type: "STRING" } }, required: ["text"] } };
-                    const result = await callGeminiAPI(prompt, schema);
-                    if (result && Array.isArray(result)) {
-                        const newObjs = result.map(i => ({ id: generateId(), text: i.text }));
-                        const newIds = newObjs.map(o => o.id);
-                        m.objectives.push(...newObjs);
-                        m.activities.forEach(a => a.objectiveIds.push(...newIds)); // auto align
-                    }
-                } catch(e) { /* Error handled in callGeminiAPI */ }
-                finally { state.loadingStates.moduleObjectives[modId] = false; renderMainContent(); }
-            }
-            else if (t.classList.contains('btn-auto-align-mod')) {
-                const modId = t.dataset.modId;
-                const m = state.modules.find(x => x.id === modId);
-                const objs = m.objectives.filter(o => o.text.trim());
-                const acts = m.activities.filter(a => a.text.trim());
-                
-                state.loadingStates.moduleAlignment[modId] = true; renderMainContent();
-                try {
-                    const prompt = `You are an expert instructional designer assessing course alignment (QM Standard 2.4). We have the following Module Learning Objectives:\n${objs.map(o => `[Obj-ID: ${o.id}] ${o.text}`).join('\n')}\nWe have the following Coursework/Assessments:\n${acts.map(a => `[Act-ID: ${a.id}] Type: ${a.type} | Title: "${a.text}" | Details: "${a.description || 'None'}"`).join('\n')}\nEvaluate which of the above objectives are directly measured by each activity. CRITICAL INSTRUCTIONS: 1. Cognitive level MUST match. 2. Reading material or viewing a video is NOT mastery. Activities like "Read Chapter 1" MUST NOT align with any objectives. 3. Be highly critical. Return a JSON array of objects. Each object must represent an activity from the list and contain its "activityId" and an array of the strictly matching "objectiveIds".`;
-                    const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { activityId: { type: "STRING" }, objectiveIds: { type: "ARRAY", items: { type: "STRING" } } }, required: ["activityId", "objectiveIds"] } };
-                    const result = await callGeminiAPI(prompt, schema);
-                    if (result && Array.isArray(result)) {
-                        m.activities.forEach(a => {
-                            const match = result.find(r => r.activityId === a.id);
-                            if (match) a.objectiveIds = (match.objectiveIds || []).filter(id => objs.some(o => o.id === id));
-                        });
-                    }
-                } catch(e) { /* Error handled in callGeminiAPI */ }
-                finally { state.loadingStates.moduleAlignment[modId] = false; renderMainContent(); }
-            }
-        });
+    // Init first module on load
+    window.onload = () => { addModule(); };
+</script>
 
-        // Initialize App
-        renderAppLayout();
-    </script>
+<div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-end mb-6 border-b pb-4">
+        <div>
+            <h1 class="text-3xl font-bold text-slate-800 tracking-tight">Instructional Alignment Builder</h1>
+            <p class="text-slate-500 mt-1">Design, map, and health-check your course modules with AI.</p>
+        </div>
+        <div class="no-print space-x-2">
+            <button onclick="toggleGuide()" class="text-indigo-600 hover:text-indigo-800 font-semibold px-3"><i class="fas fa-graduation-cap mr-1"></i> Alignment 101 Guide</button>
+            <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded shadow"><i class="fas fa-print mr-2"></i> Export / Print</button>
+        </div>
+    </div>
+
+    <div id="alignment-guide" class="no-print hidden bg-indigo-50 border border-indigo-100 p-6 rounded-xl mb-8 text-indigo-900">
+        <h2 class="text-xl font-bold mb-3"><i class="fas fa-book-open mr-2"></i> How to Align Your Course</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+            <div>
+                <h3 class="font-bold text-indigo-800 mb-1">1. Measurable Objectives</h3>
+                <p>An objective states what students should be able to do. Avoid "internal" verbs like <em>understand, know, learn, or appreciate</em>. You cannot measure what is inside a student's head.</p>
+                <p class="mt-2 text-indigo-700"><strong>Use Bloom's Verbs:</strong> Identify, Describe, Analyze, Evaluate, Create.</p>
+            </div>
+            <div>
+                <h3 class="font-bold text-indigo-800 mb-1">2. Course Activities</h3>
+                <p>Every activity, reading, and assessment must exist to help the student achieve the stated objectives. If an activity is purely "busy work", it breaks alignment.</p>
+            </div>
+            <div>
+                <h3 class="font-bold text-indigo-800 mb-1">3. The Alignment Check</h3>
+                <p>Perfect alignment means:<br>
+                ✓ Every objective is measured by at least one activity.<br>
+                ✓ Every activity directly supports an objective.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="modules-container"></div>
+
+    <div class="no-print text-center mt-4">
+        <button onclick="addModule()" class="bg-white border-2 border-dashed border-slate-300 text-slate-500 hover:text-blue-600 hover:border-blue-400 font-bold py-4 px-8 rounded-xl w-full transition-all">
+            <i class="fas fa-plus-circle text-xl mr-2 align-middle"></i> Add New Module
+        </button>
+    </div>
+
+</div>
+
 </body>
 </html>
